@@ -1,1 +1,6 @@
-{"_comment": "models.json — which AI model handles which task (the routing map)"}
+{
+  "reasoning": "qwen2.5:3b-instruct",
+  "code": "qwen2.5-coder:3b",
+  "vision": "qwen2.5vl:3b",
+  "embedding": "nomic-embed-text"
+}

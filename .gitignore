@@ -1,22 +1,26 @@
 # Virtual environments
 .venv/
+kavach/.venv/
 venv/
 env/
 
 # Python bytecode & cache
 __pycache__/
+kavach/**/__pycache__/
 *.py[cod]
 *$py.class
 *.pyc
 
 # Knowledge Vault vector index
 knowledge/faiss_index/
+kavach/knowledge/faiss_index/
 faiss_index/
 *.faiss
 *.pkl
 
 # Outputs & audit logs (per backend/config.py)
 outputs/
+kavach/outputs/
 audit_log.jsonl
 *.docx
 *.csv

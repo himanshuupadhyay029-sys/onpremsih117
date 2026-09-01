@@ -1,1 +1,3 @@
-# __init__.py — makes engine a python package
+from backend.engine import ollama, registry
+
+__all__ = ["ollama", "registry"]
