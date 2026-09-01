@@ -1,23 +1,19 @@
 """ingest.py — Knowledge Vault ingestion: chunk -> embed -> FAISS.
 
-Lean RAG ingestion (Phase 4 scope): handles clean text-extractable documents
-only (.txt, .md, .pdf with real text). Scanned/image documents need OCR and are
-Phase 7's job.
+Handles clean text-extractable documents (.txt, .md, .pdf with text layers)
+as well as image-based documents (.png, .jpg, .jpeg, .tiff, .bmp, and scanned PDFs)
+via OCR preprocessing (Phase 7 extension).
 
-Text extraction uses pypdf for PDFs: it's pure-Python (no heavy native
-dependency beyond what pip already resolves), BSD-licensed, and sufficient for
-extracting real text layers from small SOP-style PDFs — no need for
-PyMuPDF's extra footprint/AGPL licensing at this scale.
-
-The FAISS index (IndexFlatL2) and a parallel metadata.json are persisted to
-config.FAISS_INDEX_DIR. New documents are ADDED to the existing index rather
-than rebuilding from scratch: metadata is a simple ordered list whose index
-position matches each vector's position in the FAISS index.
+Text extraction flow:
+- .txt / .md: direct UTF-8 file read.
+- .pdf with text layer: fast pypdf extraction (skips OCR).
+- Scanned .pdf / raw images: runs through backend/tools/ocr.py to extract text.
+- Extracted text is then chunked and embedded via nomic-embed-text into FAISS.
 """
 
 import json
-import threading
 from pathlib import Path
+import threading
 from typing import Dict, List, Union
 
 import faiss
@@ -29,7 +25,8 @@ from backend.engine import ollama, registry
 
 _lock = threading.Lock()
 
-SUPPORTED_EXTENSIONS = {".txt", ".md", ".pdf"}
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".tiff", ".bmp"}
+SUPPORTED_EXTENSIONS = {".txt", ".md", ".pdf"} | IMAGE_EXTENSIONS
 
 INDEX_PATH = config.FAISS_INDEX_DIR / "index.faiss"
 METADATA_PATH = config.FAISS_INDEX_DIR / "metadata.json"
@@ -45,8 +42,24 @@ def _extract_text(file_path: Path) -> str:
     if suffix == ".pdf":
         from pypdf import PdfReader
 
-        reader = PdfReader(str(file_path))
-        return "\n".join((page.extract_text() or "") for page in reader.pages)
+        try:
+            reader = PdfReader(str(file_path))
+            pdf_text = "\n".join((page.extract_text() or "") for page in reader.pages)
+            if len(pdf_text.strip()) > 30:
+                return pdf_text
+        except Exception:
+            pass
+
+        # Image-only or scanned PDF: run OCR
+        from backend.tools.ocr import extract_text as ocr_extract_text
+        res = ocr_extract_text(file_path)
+        return res.get("text", "")
+
+    if suffix in IMAGE_EXTENSIONS:
+        from backend.tools.ocr import extract_text as ocr_extract_text
+        res = ocr_extract_text(file_path)
+        return res.get("text", "")
+
     raise ValueError(f"Unsupported file type: {suffix} (supported: {sorted(SUPPORTED_EXTENSIONS)})")
 
 
@@ -75,6 +88,7 @@ def _chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OV
                 if overlap_len >= overlap:
                     break
             current = overlap_words
+            current_len = overlap_len
             current_len = overlap_len
 
     if current:

@@ -1,21 +1,13 @@
 """agent.py — the agent loop: PLAN -> EXECUTE -> OBSERVE, wired as a cyclic
 LangGraph StateGraph (not a straight line).
 
-Phase 2 scope: tools are STUBS (clearly labelled fake results), except the
-"llm" step which really calls the routed model via the Phase 1 engine.
-
-Phase 3 addition: append-only audit logbook integration tracking route, plan,
-step, observe, and complete/error events with strict external_calls: 0.
-
-Phase 4 addition: the 'search' tool is grounded in the Knowledge Vault FAISS RAG.
-
-Phase 5 addition: the 'document' tool calls writer.py to render styled .docx files.
-
-Phase 5 Follow-up Fix:
-Anti-hallucination observe & write logic: if a search step is ungrounded (topic
-not in SOPs), the observe node routes to revise on the first attempt, and passes
-is_grounded=False to the writer so it produces an honest notice rather than
-inventing procedural details from unrelated documents.
+Phase 2: agent loop with self-correction and router.
+Phase 3: append-only audit logbook integration.
+Phase 4: Knowledge Vault FAISS RAG search tool.
+Phase 5: Word Document (.docx) writer with anti-hallucination guard.
+Phase 6: network-isolated Docker sandbox for code execution with error-feedback self-correction.
+Phase 7: OCR (reading scanned/image documents) + Vision (multimodal image/drawing analysis).
+Phase 8: Deterministic engineering math calculator (calc.py) showing real arithmetic steps.
 """
 
 import json
@@ -29,26 +21,33 @@ from backend.audit.logbook import log_event
 from backend.brain.router import route
 from backend.brain.state import AgentState
 from backend.engine import ollama, registry
+from backend.tools.calc import calculate as calc_tool
+from backend.tools.code import write_and_run as code_tool_run
+from backend.tools.ocr import extract_text as ocr_tool_extract
 from backend.tools.search import search as search_tool
+from backend.tools.vision import describe_image as vision_tool_describe
 from backend.tools.writer import write_document as writer_tool
 
 MAX_TOTAL_STEPS = 10
 MAX_REVISIONS = 3
 ERROR_TRIGGER = "simulate_error"
+CODE_TIMEOUT_SECONDS = 15
 
-VALID_TOOLS = {"llm", "search", "calc", "vision", "document"}
+VALID_TOOLS = {"llm", "search", "calc", "vision", "document", "code", "ocr"}
 
 PLAN_PROMPT_TEMPLATE = """You are the planning module of an AI agent. Break the task below into 1 to 6 ordered steps required to complete it.
 
 Each step must be an object with:
   "step": <integer, starting at 1>
-  "tool": one of ["llm", "search", "calc", "vision", "document"]
+  "tool": one of ["llm", "search", "calc", "vision", "document", "code", "ocr"]
   "input": a short instruction/query for that tool
 
-Use "llm" for steps that require reasoning, writing, or generating text/code directly.
-Use "search" for steps needing external/web/SOP information.
-Use "calc" for steps needing numeric computation.
-Use "vision" for steps needing image analysis.
+Use "llm" for steps that require reasoning, writing, or explaining WITHOUT executing anything.
+Use "calc" for steps performing numerical math, formulas, or engineering calculations with step-by-step arithmetic.
+Use "code" for steps that need to generate AND ACTUALLY RUN a Python script in the secure sandbox.
+Use "search" for steps needing SOP or reference information from the Knowledge Vault.
+Use "ocr" for steps reading/extracting text from an image or scanned document file path.
+Use "vision" for steps analyzing photos, engineering drawings, diagrams, or gauges using multimodal AI.
 Use "document" for steps creating formal docx reports.
 
 Task: {task}
@@ -66,12 +65,16 @@ def _normalize_tool(name: str) -> str:
     n = (name or "").strip().lower()
     if n in VALID_TOOLS:
         return n
-    if "search" in n or "web" in n or "browse" in n:
-        return "search"
-    if "calc" in n or "math" in n:
+    if "calc" in n or "math" in n or "compute" in n or "formula" in n:
         return "calc"
-    if "vision" in n or "image" in n:
+    if "ocr" in n or "scan" in n:
+        return "ocr"
+    if "vision" in n or "image" in n or "photo" in n or "diagram" in n or "drawing" in n:
         return "vision"
+    if "code" in n or "python" in n or "script" in n or "execute" in n or "sandbox" in n:
+        return "code"
+    if "search" in n or "web" in n or "browse" in n or "vault" in n:
+        return "search"
     if "doc" in n or "write" in n or "word" in n:
         return "document"
     return "llm"
@@ -130,10 +133,21 @@ def plan_node(state: AgentState) -> dict:
     failure_context = ""
     if is_revision and state["step_outputs"]:
         last = state["step_outputs"][-1]
+        if last["tool"] == "code":
+            guidance = (
+                "The code failed to run. Revise the plan to include a 'code' step that "
+                "regenerates and re-runs a corrected script accomplishing the same task."
+            )
+        elif last["tool"] == "search":
+            guidance = "Revise the plan to either use broader search keywords or proceed to document the missing documentation."
+        elif last["tool"] == "calc":
+            guidance = "The calculation failed or had missing inputs. Revise the plan to search/extract the missing values first."
+        else:
+            guidance = "Revise the plan to work around this failure."
         failure_context = (
             f"\n\nIMPORTANT: A previous attempt at step {last['step_num']} "
             f"(tool: {last['tool']}) reported: {last['output']}\n"
-            "Revise the plan to either use broader search keywords or proceed to document the missing documentation."
+            f"{guidance}"
         )
 
     prompt = PLAN_PROMPT_TEMPLATE.format(
@@ -160,7 +174,6 @@ def plan_node(state: AgentState) -> dict:
     steps = _parse_plan(raw, fallback_input=state["original_task"])
     action = {"role": "action", "content": f"Generated plan: {json.dumps(steps)}"}
 
-    # Audit logging for plan event
     log_event(
         task_id=state.get("task_id"),
         event_type="plan",
@@ -199,6 +212,8 @@ def execute_node(state: AgentState) -> dict:
     action = {"role": "action", "content": f"CALL {tool}({step_input!r})"}
     messages_update: List[dict] = []
     doc_meta: dict = {}
+    code_meta: dict = {}
+    extra_meta: dict = {}
     is_grounded_flag = True
 
     if tool == "llm":
@@ -228,22 +243,117 @@ def execute_node(state: AgentState) -> dict:
         else:
             output = answer
         is_error = False
+    elif tool == "calc":
+        actor = "calc_tool"
+        sources = None
+        prior_context_list = [o["output"] for o in state["step_outputs"]]
+        context_str = "\n".join(prior_context_list) if prior_context_list else None
+        calc_res = calc_tool(step_input, context=context_str, task_id=state.get("task_id"))
+        if calc_res.get("success"):
+            output = f"Calculation '{calc_res['formula_name']}':\n" + "\n".join(calc_res.get("steps", []))
+            is_error = False
+        else:
+            output = f"[error] {calc_res.get('error', 'Calculation failed')}"
+            is_error = True
+        extra_meta = {
+            "calc_result": calc_res.get("result"),
+            "formula_name": calc_res.get("formula_name"),
+            "unit": calc_res.get("unit"),
+        }
+    elif tool == "ocr":
+        actor = "ocr_tool"
+        sources = None
+        try:
+            ocr_res = ocr_tool_extract(step_input.strip(), task_id=state.get("task_id"))
+            output = f"OCR Extracted Text (Engine: {ocr_res['engine']}, Confidence: {ocr_res['confidence']:.2f}):\n{ocr_res['text']}"
+            is_error = False
+            actor = ocr_res["engine"]
+            extra_meta = {
+                "engine": ocr_res["engine"],
+                "confidence": ocr_res["confidence"],
+                "low_confidence": ocr_res["low_confidence"],
+            }
+        except Exception as exc:
+            output = f"[error] OCR extraction failed: {exc}"
+            is_error = True
+    elif tool == "vision":
+        actor = registry.get_model("vision")
+        sources = None
+        try:
+            target_str = step_input.strip()
+            q_target = None
+            if "|" in target_str:
+                parts = target_str.split("|", 1)
+                target_str = parts[0].strip()
+                q_target = parts[1].strip()
+
+            vis_res = vision_tool_describe(target_str, question=q_target, task_id=state.get("task_id"))
+            output = vis_res["description"]
+            is_error = False
+            extra_meta = {"image_path": vis_res["image_path"], "question": q_target}
+        except Exception as exc:
+            output = f"[error] Vision analysis failed: {exc}"
+            is_error = True
+    elif tool == "code":
+        actor = registry.get_model("code")
+        sources = None
+
+        prior_error = None
+        for prev in reversed(state["step_outputs"]):
+            if prev.get("tool") == "code" and prev.get("error"):
+                prior_error = prev.get("stderr") or prev.get("output")
+                break
+
+        code_result = code_tool_run(
+            step_input,
+            prior_error=prior_error,
+            timeout_seconds=CODE_TIMEOUT_SECONDS,
+            task_id=state.get("task_id"),
+        )
+        is_error = not code_result["success"]
+        if is_error:
+            output = (
+                f"[error] code execution failed (exit_code={code_result['exit_code']}, "
+                f"timed_out={code_result['timed_out']}).\nstderr:\n{code_result['stderr']}"
+            )
+        else:
+            output = f"Code executed successfully (exit_code=0).\nstdout:\n{code_result['stdout']}"
+
+        code_meta = {
+            "code": code_result["code"],
+            "stdout": code_result["stdout"],
+            "stderr": code_result["stderr"],
+            "exit_code": code_result["exit_code"],
+            "timed_out": code_result["timed_out"],
+        }
     elif tool == "document":
         actor = "writer"
-        # Check all prior searches to see if any was ungrounded
         prior_sources: List[dict] = []
         has_search = False
-        all_search_grounded = True
+        has_grounded_search = False
+        last_search_grounded = None
+
         for prev_out in state["step_outputs"]:
             if prev_out.get("tool") == "search":
                 has_search = True
-                if not prev_out.get("grounded", True):
-                    all_search_grounded = False
-                if "sources" in prev_out and prev_out["sources"]:
-                    prior_sources.extend(prev_out["sources"])
+                if prev_out.get("grounded", False):
+                    has_grounded_search = True
+                    last_search_grounded = True
+                    if "sources" in prev_out and prev_out["sources"]:
+                        existing_fns = {s["filename"] for s in prior_sources if "filename" in s}
+                        for s in prev_out["sources"]:
+                            if s.get("filename") not in existing_fns:
+                                prior_sources.append(s)
+                                existing_fns.add(s.get("filename"))
+                else:
+                    last_search_grounded = False
 
-        # If a search was performed and returned ungrounded, enforce honest ungrounded document mode
-        is_doc_grounded = not (has_search and not all_search_grounded)
+        if has_grounded_search:
+            is_doc_grounded = True
+        elif has_search:
+            is_doc_grounded = bool(last_search_grounded)
+        else:
+            is_doc_grounded = True
 
         try:
             doc_res = writer_tool(
@@ -288,10 +398,13 @@ def execute_node(state: AgentState) -> dict:
         step_output["sources"] = sources
     if doc_meta:
         step_output.update(doc_meta)
+    if code_meta:
+        step_output.update(code_meta)
+    if extra_meta:
+        step_output.update(extra_meta)
 
     observation = {"role": "observation", "content": f"Result: {output[:300]}"}
 
-    # Audit logging for step event
     log_event(
         task_id=state.get("task_id"),
         event_type="step",
@@ -305,6 +418,8 @@ def execute_node(state: AgentState) -> dict:
             "error": is_error,
             "grounded": is_grounded_flag,
             **doc_meta,
+            **code_meta,
+            **extra_meta,
         },
         external_calls=0,
     )
@@ -373,7 +488,6 @@ def observe_node(state: AgentState) -> dict:
         )
         return {"trace": trace_entries, "status": "revising"}
 
-    # If search was ungrounded and we haven't revised yet, attempt re-planning once with a broader query
     if is_ungrounded_search and state.get("revise_count", 0) == 0:
         trace_entries.append(
             {"role": "thought", "content": "Search did not find grounded SOP information. Self-correcting: routing to REVISE to try broader search."}
@@ -436,7 +550,6 @@ def finalize_node(state: AgentState) -> dict:
 
     observation = {"role": "observation", "content": f"Final answer: {final_answer[:300]}"}
 
-    # Audit logging for completion or error event
     if failed:
         log_event(
             task_id=state.get("task_id"),
@@ -502,7 +615,6 @@ def run_agent(task: str, attachment_type: Optional[str] = None, task_id: Optiona
     model_role = routing_decision.model_role
     model_tag = registry.get_model(model_role)
 
-    # Audit logging for route event
     log_event(
         task_id=task_id,
         event_type="route",
@@ -546,6 +658,7 @@ def run_agent(task: str, attachment_type: Optional[str] = None, task_id: Optiona
 
     sources_used: List[dict] = []
     generated_files: List[dict] = []
+    code_runs: List[dict] = []
     for step_output in final_state["step_outputs"]:
         if "sources" in step_output and step_output["sources"]:
             sources_used.extend(step_output["sources"])
@@ -555,6 +668,16 @@ def run_agent(task: str, attachment_type: Optional[str] = None, task_id: Optiona
                 "file_path": step_output.get("file_path"),
                 "title": step_output.get("title"),
                 "grounded": step_output.get("grounded", True),
+            })
+        if step_output.get("tool") == "code":
+            code_runs.append({
+                "step_num": step_output["step_num"],
+                "code": step_output.get("code"),
+                "stdout": step_output.get("stdout"),
+                "stderr": step_output.get("stderr"),
+                "exit_code": step_output.get("exit_code"),
+                "timed_out": step_output.get("timed_out"),
+                "error": step_output.get("error"),
             })
 
     return {
@@ -567,6 +690,7 @@ def run_agent(task: str, attachment_type: Optional[str] = None, task_id: Optiona
         "result": final_state["final_answer"],
         "sources": sources_used,
         "generated_files": generated_files,
+        "code_runs": code_runs,
         "status": final_state["status"],
         "model_used": model_used,
     }
