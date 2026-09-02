@@ -356,6 +356,59 @@ window.submitApprovalEdit = async function(taskId) {
   }
 };
 
+function renderCodeCard(run) {
+  const lang = (run.language || "python").toLowerCase();
+  const langLabels = { python: "Python", javascript: "JavaScript", c: "C" };
+  const langName = langLabels[lang] || lang.toUpperCase();
+  const isErr = (run.exit_code !== 0 && run.exit_code !== undefined) || run.error;
+  const duration = run.duration_seconds !== undefined ? `${run.duration_seconds}s` : "";
+  const exitText = run.exit_code !== undefined ? `exit ${run.exit_code}` : "";
+  const metaText = [exitText, duration].filter(Boolean).join(" · ");
+  const code = run.code || "";
+  const stdout = run.stdout || "";
+  const stderr = run.stderr || "";
+
+  return `
+    <div class="card code-card">
+      <div class="code-header">
+        <div class="code-badges">
+          <span class="section-label" style="margin:0;">Generated Code</span>
+          <span class="code-lang-badge">${esc(langName)}</span>
+        </div>
+        ${metaText ? `<span class="code-meta-badge ${isErr ? "is-error" : ""}">${esc(metaText)}</span>` : ""}
+      </div>
+
+      <div class="code-wrap">
+        <button class="copy-code-btn" onclick="copyCodeText(this)" data-code="${esc(code)}" title="Copy code">
+          <svg class="icon" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+          <span>Copy</span>
+        </button>
+        <pre class="code-content"><code>${esc(code)}</code></pre>
+      </div>
+
+      ${(stdout || stderr) ? `
+        <div class="code-output-box">
+          <div class="code-output-label">Terminal Output</div>
+          ${stdout ? `<pre class="code-stdout">${esc(stdout)}</pre>` : ""}
+          ${stderr ? `<pre class="code-stderr">${esc(stderr)}</pre>` : ""}
+        </div>
+      ` : ""}
+    </div>
+  `;
+}
+
+window.copyCodeText = function(btn) {
+  const code = btn.getAttribute("data-code") || "";
+  navigator.clipboard.writeText(code).then(() => {
+    const span = btn.querySelector("span");
+    if (span) {
+      const orig = span.textContent;
+      span.textContent = "Copied!";
+      setTimeout(() => { span.textContent = orig; }, 2000);
+    }
+  }).catch(() => {});
+};
+
 function renderResult(data) {
   const parts = [];
 
@@ -374,6 +427,11 @@ function renderResult(data) {
           <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8l-5-5z"/><path d="M14 3v5h5"/></svg>
           <span>${esc(s.filename)}</span>
         </div>`).join("")}</div></div>`);
+  }
+
+  for (const run of data.code_runs || []) {
+    if (!run.code) continue;
+    parts.push(renderCodeCard(run));
   }
 
   for (const file of data.generated_files || []) {

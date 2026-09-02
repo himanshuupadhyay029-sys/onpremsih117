@@ -371,11 +371,13 @@ def execute_node(state: AgentState) -> dict:
             output = f"Code executed successfully (exit_code=0).\nstdout:\n{code_result['stdout']}"
 
         code_meta = {
+            "language": code_result.get("language", "python"),
             "code": code_result["code"],
             "stdout": code_result["stdout"],
             "stderr": code_result["stderr"],
             "exit_code": code_result["exit_code"],
             "timed_out": code_result["timed_out"],
+            "duration_seconds": code_result.get("duration_seconds", 0.0),
         }
     elif tool == "document":
         actor = "writer"
@@ -823,11 +825,13 @@ def run_agent(task: str, attachment_type: Optional[str] = None, task_id: Optiona
         if step_output.get("tool") == "code":
             code_runs.append({
                 "step_num": step_output["step_num"],
+                "language": step_output.get("language", "python"),
                 "code": step_output.get("code"),
                 "stdout": step_output.get("stdout"),
                 "stderr": step_output.get("stderr"),
                 "exit_code": step_output.get("exit_code"),
                 "timed_out": step_output.get("timed_out"),
+                "duration_seconds": step_output.get("duration_seconds", 0.0),
                 "error": step_output.get("error"),
             })
 

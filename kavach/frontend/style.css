@@ -761,3 +761,126 @@ select.field { flex: none; min-width: 150px; cursor: pointer; }
   border-radius: 8px;
   margin-top: 12px;
 }
+
+/* -------------------------------------------------------- code execution -- */
+
+.code-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.code-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.code-badges {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.code-lang-badge {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: var(--kavach-accent-muted);
+  color: var(--kavach-accent-hover);
+}
+
+.code-meta-badge {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.code-meta-badge.is-error {
+  color: var(--status-alert);
+}
+
+.code-wrap {
+  position: relative;
+  background: #18181B;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  border-radius: 9px;
+  padding: 14px 16px;
+  overflow-x: auto;
+}
+
+.code-content {
+  margin: 0;
+  padding: 0;
+  font-family: "SF Mono", Monaco, Menlo, Consolas, "Courier New", monospace;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: #E4E4E7;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.copy-code-btn {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #A1A1AA;
+  font-size: 11.5px;
+  transition: all var(--ease);
+}
+
+.copy-code-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: #FFFFFF;
+}
+
+.copy-code-btn .icon {
+  width: 13px;
+  height: 13px;
+}
+
+.code-output-box {
+  background: var(--bg-page);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+
+.code-output-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-tertiary);
+  margin-bottom: 6px;
+}
+
+.code-stdout, .code-stderr {
+  margin: 0;
+  padding: 0;
+  font-family: "SF Mono", Monaco, Menlo, Consolas, "Courier New", monospace;
+  font-size: 12.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.code-stdout {
+  color: var(--text-primary);
+}
+
+.code-stderr {
+  color: var(--status-alert);
+  margin-top: 6px;
+}
+
