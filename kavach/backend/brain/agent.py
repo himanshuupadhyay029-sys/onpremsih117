@@ -821,6 +821,7 @@ def run_agent(task: str, attachment_type: Optional[str] = None, task_id: Optiona
                 "file_path": step_output.get("file_path"),
                 "title": step_output.get("title"),
                 "grounded": step_output.get("grounded", True),
+                "sources": step_output.get("sources", []),
             })
         if step_output.get("tool") == "code":
             code_runs.append({

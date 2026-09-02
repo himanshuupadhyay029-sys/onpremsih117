@@ -227,6 +227,8 @@ function renderApprovalCard(data) {
   const draft = data.draft_content || {};
   const title = draft.title || "Document Draft";
   const sections = draft.sections || [];
+  const draftSources = draft.sources || data.sources || [];
+  const sourceNames = [...new Set(draftSources.map((s) => (typeof s === "string" ? s : s?.filename)).filter(Boolean))];
 
   return `
     <div class="card approval-card risk-is-${risk}" id="approval-card-${taskId}">
@@ -239,6 +241,12 @@ function renderApprovalCard(data) {
 
       <div class="approval-preview-box">
         <div class="approval-draft-title">${esc(title)}</div>
+        ${sourceNames.length ? `
+          <div class="approval-sources-line">
+            <span class="doc-sources-label">Sources:</span>
+            <span class="doc-sources-names">${sourceNames.map(esc).join(", ")}</span>
+          </div>
+        ` : ""}
         ${sections.map((s, idx) => `
           <div class="approval-sec">
             <div class="approval-sec-heading">${esc(s.heading || `Section ${idx + 1}`)}</div>
@@ -418,14 +426,15 @@ function renderResult(data) {
     parts.push(`<div class="card"><div class="answer">${esc(data.result)}</div></div>`);
   }
 
-  const sources = [...new Map((data.sources || []).map((s) => [s.filename, s])).values()];
-  if (sources.length) {
-    parts.push(`<div class="card">
-      <p class="section-label">Sources</p>
-      <div class="sources">${sources.map((s) => `
-        <div class="source">
+  const rawSources = data.sources || [];
+  const sourceNames = [...new Set(rawSources.map((s) => (typeof s === "string" ? s : s?.filename)).filter(Boolean))];
+  if (sourceNames.length) {
+    parts.push(`<div class="card sources-card">
+      <p class="section-label">Referenced Sources</p>
+      <div class="sources-list">${sourceNames.map((name) => `
+        <div class="source-item">
           <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8l-5-5z"/><path d="M14 3v5h5"/></svg>
-          <span>${esc(s.filename)}</span>
+          <span class="source-name">${esc(name)}</span>
         </div>`).join("")}</div></div>`);
   }
 
@@ -436,12 +445,20 @@ function renderResult(data) {
 
   for (const file of data.generated_files || []) {
     if (!file.filename) continue;
+    const fileSources = [...new Set((file.sources || rawSources).map((s) => (typeof s === "string" ? s : s?.filename)).filter(Boolean))];
     parts.push(`<div class="card">
       <p class="section-label">Generated document</p>
       <a class="download-btn" href="/download/${encodeURIComponent(file.filename)}" download>
         <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M12 4v12M7 13l5 5 5-5"/><path d="M4 20h16"/></svg>
         <span>${esc(file.title || file.filename)}</span>
-      </a></div>`);
+      </a>
+      ${fileSources.length ? `
+        <div class="doc-sources-meta">
+          <span class="doc-sources-label">Sources cited in file:</span>
+          <span class="doc-sources-names">${fileSources.map(esc).join(", ")}</span>
+        </div>
+      ` : ""}
+    </div>`);
   }
 
   if (data.status === "failed") {
