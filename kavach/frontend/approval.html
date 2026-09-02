@@ -1,1 +1,255 @@
-<!-- approval.html — the human sign-off pop-up -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KAVACH — Document Approval</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Source+Serif+4:opsz,wght@8..60,400;8..60,500&display=swap">
+<link rel="stylesheet" href="/static/style.css">
+<style>
+  body {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    padding: 24px;
+    background: var(--bg-page);
+  }
+  .approval-container {
+    max-width: 680px;
+    width: 100%;
+  }
+  .top-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 20px;
+  }
+  .logo-link {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text-primary);
+    font-family: var(--font-serif);
+    font-size: 18px;
+    font-weight: 500;
+  }
+  .logo-link:hover {
+    text-decoration: none;
+    color: var(--kavach-accent-hover);
+  }
+</style>
+</head>
+<body>
+
+<div class="approval-container">
+  <header class="top-header">
+    <a href="/" class="logo-link">
+      <svg class="icon" viewBox="0 0 24 24"><path d="M12 3l7 3v5.5c0 4.2-2.9 8.1-7 9.5-4.1-1.4-7-5.3-7-9.5V6l7-3z"/></svg>
+      <span>KAVACH</span>
+    </a>
+    <div class="sovereignty">
+      <span class="dot is-safe"></span>
+      <span>Approval Gate</span>
+    </div>
+  </header>
+
+  <div id="approval-content">
+    <div class="card">
+      <p class="approval-reasoning">Loading approval record…</p>
+    </div>
+  </div>
+</div>
+
+<script>
+const urlParams = new URLSearchParams(window.location.search);
+const taskId = urlParams.get("task_id");
+
+function esc(s) {
+  return String(s || "")
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
+async function loadApproval() {
+  const container = document.getElementById("approval-content");
+  if (!taskId) {
+    container.innerHTML = `<div class="card"><p class="error-note">No task_id specified in URL parameters.</p></div>`;
+    return;
+  }
+
+  try {
+    const res = await fetch(`/approval/${encodeURIComponent(taskId)}`);
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+    const data = await res.json();
+
+    const risk = (data.risk || "medium").toLowerCase();
+    const conf = data.confidence !== undefined ? Math.round(data.confidence * 100) : 50;
+    const reasoning = data.reasoning || "Awaiting human review.";
+    const draft = data.document_content || {};
+    const title = draft.title || "Document Draft";
+    const sections = draft.sections || [];
+
+    if (data.status === "approved" || data.status === "edited") {
+      container.innerHTML = `
+        <div class="card">
+          <p class="section-label">Document Status: ${esc(data.status.toUpperCase())}</p>
+          <div class="approval-notice" style="margin-bottom: 16px;">This document was reviewed and approved.</div>
+          ${data.filename ? `
+            <a class="download-btn" href="/download/${encodeURIComponent(data.filename)}" download>
+              <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M12 4v12M7 13l5 5 5-5"/><path d="M4 20h16"/></svg>
+              <span>Download ${esc(data.filename)}</span>
+            </a>
+          ` : ""}
+        </div>
+      `;
+      return;
+    }
+
+    if (data.status === "rejected") {
+      container.innerHTML = `
+        <div class="card">
+          <p class="section-label">Document Status: REJECTED</p>
+          <p class="error-note">This document was rejected by the supervisor. Generation aborted.</p>
+        </div>
+      `;
+      return;
+    }
+
+    container.innerHTML = `
+      <div class="card approval-card risk-is-${risk}">
+        <p class="section-label">Human Oversight Required</p>
+        <div class="approval-meta">
+          <span class="risk-text-${risk}">Risk: ${esc(risk.toUpperCase())}</span>
+          <span class="approval-conf">&middot; Confidence: ${conf}%</span>
+        </div>
+        <div class="approval-reasoning">${esc(reasoning)}</div>
+
+        <div class="approval-preview-box">
+          <div class="approval-draft-title">${esc(title)}</div>
+          ${sections.map((s, idx) => `
+            <div class="approval-sec">
+              <div class="approval-sec-heading">${esc(s.heading || `Section ${idx + 1}`)}</div>
+              <p class="approval-sec-body">${esc(s.body || "")}</p>
+            </div>
+          `).join("")}
+        </div>
+
+        <div class="approval-actions" id="actions-row">
+          <button class="btn btn-primary" onclick="act('approve')">
+            <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>
+            <span>Approve</span>
+          </button>
+          <button class="btn btn-secondary" onclick="toggleEdit()">
+            <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+            <span>Edit</span>
+          </button>
+          <button class="btn btn-danger-quiet" onclick="act('reject')">
+            <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
+            <span>Reject</span>
+          </button>
+        </div>
+
+        <div class="approval-edit-wrap" id="edit-wrap" hidden>
+          <label class="approval-edit-label">Document Title</label>
+          <input class="approval-input" id="edit-title" value="${esc(title)}">
+          <label class="approval-edit-label">Sections Content (JSON)</label>
+          <textarea class="approval-textarea" id="edit-sections" rows="6">${esc(JSON.stringify(sections, null, 2))}</textarea>
+          <div class="approval-edit-actions">
+            <button class="btn btn-primary" onclick="submitEdit()">
+              <span>Submit with Edits</span>
+            </button>
+            <button class="btn btn-secondary" onclick="toggleEdit()">
+              <span>Cancel</span>
+            </button>
+          </div>
+        </div>
+
+        <div id="outcome-box"></div>
+      </div>
+    `;
+  } catch (err) {
+    container.innerHTML = `<div class="card"><p class="error-note">Could not load approval record: ${esc(err.message)}</p></div>`;
+  }
+}
+
+function toggleEdit() {
+  const wrap = document.getElementById("edit-wrap");
+  if (wrap) wrap.hidden = !wrap.hidden;
+}
+
+async function act(decision) {
+  const actions = document.getElementById("actions-row");
+  const outcome = document.getElementById("outcome-box");
+  if (actions) actions.style.display = "none";
+  outcome.innerHTML = `<div class="approval-notice">Processing ${decision}…</div>`;
+
+  try {
+    const res = await fetch(`/approval/${encodeURIComponent(taskId)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ decision: decision }),
+    });
+    const data = await res.json();
+    if (decision === "reject") {
+      outcome.innerHTML = `<p class="error-note" style="margin-top: 14px;">Document rejected. No file generated.</p>`;
+    } else {
+      outcome.innerHTML = `
+        <div class="approval-notice" style="margin: 12px 0;">Document approved successfully!</div>
+        <a class="download-btn" href="/download/${encodeURIComponent(data.filename)}" download>
+          <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M12 4v12M7 13l5 5 5-5"/><path d="M4 20h16"/></svg>
+          <span>Download ${esc(data.filename)}</span>
+        </a>
+      `;
+    }
+  } catch (err) {
+    if (actions) actions.style.display = "flex";
+    outcome.innerHTML = `<p class="error-note">Action failed: ${esc(err.message)}</p>`;
+  }
+}
+
+async function submitEdit() {
+  const title = document.getElementById("edit-title").value.trim();
+  const sectionsRaw = document.getElementById("edit-sections").value.trim();
+  const actions = document.getElementById("actions-row");
+  const editWrap = document.getElementById("edit-wrap");
+  const outcome = document.getElementById("outcome-box");
+
+  let parsed = [];
+  try {
+    parsed = JSON.parse(sectionsRaw);
+    if (!Array.isArray(parsed)) parsed = [{ heading: "Summary", body: sectionsRaw }];
+  } catch {
+    parsed = [{ heading: "Summary", body: sectionsRaw }];
+  }
+
+  if (actions) actions.style.display = "none";
+  if (editWrap) editWrap.hidden = true;
+  outcome.innerHTML = `<div class="approval-notice">Rendering edited document…</div>`;
+
+  try {
+    const res = await fetch(`/approval/${encodeURIComponent(taskId)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ decision: "edit", edited_content: { title, sections: parsed } }),
+    });
+    const data = await res.json();
+    outcome.innerHTML = `
+      <div class="approval-notice" style="margin: 12px 0;">Document updated and rendered with your edits!</div>
+      <a class="download-btn" href="/download/${encodeURIComponent(data.filename)}" download>
+        <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M12 4v12M7 13l5 5 5-5"/><path d="M4 20h16"/></svg>
+        <span>Download ${esc(data.filename)}</span>
+      </a>
+    `;
+  } catch (err) {
+    if (editWrap) editWrap.hidden = false;
+    outcome.innerHTML = `<p class="error-note">Edit submission failed: ${esc(err.message)}</p>`;
+  }
+}
+
+loadApproval();
+</script>
+</body>
+</html>

@@ -1,1 +1,141 @@
-<!-- index.html — the shell that holds all the screens together -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KAVACH</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Source+Serif+4:opsz,wght@8..60,400;8..60,500&display=swap">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<div class="app">
+
+  <!-- ------------------------------------------------------------ sidebar -->
+  <aside class="sidebar">
+    <div class="wordmark" id="wordmark">
+      <svg class="icon" viewBox="0 0 24 24"><path d="M12 3l7 3v5.5c0 4.2-2.9 8.1-7 9.5-4.1-1.4-7-5.3-7-9.5V6l7-3z"/></svg>
+      <span class="wordmark-text">KAVACH</span>
+    </div>
+
+    <nav class="nav">
+      <button class="nav-item is-active" data-screen="task">
+        <svg class="icon" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+        <span>New Task</span>
+      </button>
+      <button class="nav-item" data-screen="vault">
+        <svg class="icon" viewBox="0 0 24 24"><path d="M4 7c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3z"/><path d="M4 7v10c0 1.7 3.6 3 8 3s8-1.3 8-3V7"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg>
+        <span>Knowledge Vault</span>
+      </button>
+      <button class="nav-item" data-screen="audit">
+        <svg class="icon" viewBox="0 0 24 24"><path d="M8 6h12M8 12h12M8 18h12M3.5 6h.01M3.5 12h.01M3.5 18h.01"/></svg>
+        <span>Audit Log</span>
+      </button>
+    </nav>
+
+    <div class="sidebar-foot">Runs entirely on this machine.</div>
+  </aside>
+
+  <!-- --------------------------------------------------------------- main -->
+  <main class="main">
+
+    <header class="topbar">
+      <div class="sovereignty" id="sovereignty" title="Live connection monitor">
+        <span class="dot" id="sov-dot"></span>
+        <span id="sov-text">Connecting to monitor…</span>
+      </div>
+
+      <button class="lock-toggle" id="lock-toggle">
+        <svg class="icon icon-sm" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 118 0v3"/></svg>
+        <span id="lock-label">Lockdown off</span>
+      </button>
+
+      <div class="inline-note" id="inline-note" hidden></div>
+    </header>
+
+    <div class="screens">
+
+      <!-- ------------------------------------------------------ new task -->
+      <section class="screen" id="screen-task">
+        <div class="greeting-wrap" id="greeting-wrap">
+          <h1 class="greeting">Where should we begin?</h1>
+        </div>
+
+        <div class="composer">
+          <textarea id="task-input" rows="1" placeholder="Ask about an SOP, run a calculation, or draft a report…"></textarea>
+
+          <div id="attachment" class="attachment" hidden>
+            <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M14 4l-7.5 7.5a3 3 0 004.2 4.2L18 8.5"/></svg>
+            <span id="attachment-name"></span>
+            <button id="attachment-clear" title="Remove attachment">
+              <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+            </button>
+          </div>
+
+          <div class="composer-bar">
+            <button class="ghost-btn" id="attach-btn">
+              <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M14 4l-7.5 7.5a3 3 0 004.2 4.2L18 8.5"/></svg>
+              <span>Attach</span>
+            </button>
+            <input type="file" id="file-input" hidden>
+            <div class="composer-spacer"></div>
+            <button class="send-btn" id="send-btn" disabled title="Run task">
+              <svg class="icon" viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="run" id="run" hidden>
+          <div class="run-meta" id="run-meta"></div>
+          <div class="thinking" id="thinking" hidden>
+            <span class="pulse"></span>
+            <span id="thinking-text">Planning…</span>
+          </div>
+          <div class="steps" id="steps"></div>
+          <div id="result"></div>
+        </div>
+      </section>
+
+      <!-- --------------------------------------------------------- vault -->
+      <section class="screen" id="screen-vault" hidden>
+        <div class="screen-head">
+          <h2 class="screen-title">Knowledge Vault</h2>
+          <p class="screen-sub">Documents indexed locally. Nothing leaves this machine.</p>
+        </div>
+
+        <div class="dropzone" id="dropzone">
+          <svg class="icon" viewBox="0 0 24 24"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2"/></svg>
+          <div id="dropzone-text">Drop a document here, or click to choose</div>
+          <div class="dropzone-hint">PDF, TXT, MD, or scanned images (PNG, JPG, TIFF, BMP)</div>
+        </div>
+        <input type="file" id="vault-file-input" hidden>
+
+        <div class="doc-list" id="doc-list"></div>
+      </section>
+
+      <!-- --------------------------------------------------------- audit -->
+      <section class="screen screen-wide" id="screen-audit" hidden>
+        <div class="screen-head">
+          <h2 class="screen-title">Audit Log</h2>
+          <p class="screen-sub">Every action this system has taken, in order.</p>
+        </div>
+
+        <div class="filters">
+          <input class="field" id="audit-task-filter" placeholder="Filter by task ID…">
+          <select class="field" id="audit-type-filter">
+            <option value="">All event types</option>
+          </select>
+        </div>
+
+        <div class="events" id="events"></div>
+      </section>
+
+    </div>
+  </main>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

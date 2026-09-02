@@ -11,17 +11,22 @@ os.environ.pop("LANGCHAIN_API_KEY", None)
 os.environ.pop("LANGSMITH_API_KEY", None)
 
 import asyncio
+import json
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional, Union
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from backend import config
-from backend.audit.logbook import read_events
+from backend.audit.logbook import log_event, read_events
 from backend.brain.agent import run_agent
 from backend.engine import ollama, registry
+from backend.guard.approve import get_approval, resolve_approval
+from backend.tools.writer import render_docx
+from backend.vault.ingest import METADATA_PATH, SUPPORTED_EXTENSIONS, ingest_document
 from backend.shield.firewall import (
     check_firewall_status,
     disable_firewall_lockdown,
@@ -34,7 +39,13 @@ from backend.shield.monitor import (
     stop_monitor,
 )
 
-app = FastAPI(title="KAVACH", description="Phase 9: Sovereignty Proof (Firewall + Connection Monitor) + Brain")
+app = FastAPI(title="KAVACH", description="Phase 10: Frontend UI + Sovereignty Proof + Agent Brain")
+
+FRONTEND_DIR = config.PROJECT_ROOT / "frontend"
+UPLOADS_DIR = config.PROJECT_ROOT / "knowledge" / "uploads"
+UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+
+app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
 
 
 @app.on_event("startup")
@@ -51,6 +62,12 @@ class RunRequest(BaseModel):
     task: str
     attachment_type: Optional[str] = None
     task_id: Optional[str] = None
+
+
+@app.get("/")
+def ui_root():
+    """Serves the Phase 10 UI shell."""
+    return FileResponse(FRONTEND_DIR / "index.html")
 
 
 @app.get("/health")
@@ -79,6 +96,80 @@ def audit(task_id: Optional[str] = None):
     return {"events": read_events(task_id=task_id)}
 
 
+class ApprovalRequest(BaseModel):
+    decision: str
+    edited_content: Optional[Any] = None
+
+
+@app.get("/approval/{task_id}")
+def get_approval_endpoint(task_id: str):
+    record = get_approval(task_id)
+    if not record:
+        raise HTTPException(status_code=404, detail=f"No approval record found for task '{task_id}'.")
+    return record
+
+
+@app.post("/approval/{task_id}")
+def post_approval_endpoint(task_id: str, req: ApprovalRequest):
+    record = get_approval(task_id)
+    if not record:
+        raise HTTPException(status_code=404, detail=f"No approval record found for task '{task_id}'.")
+
+    decision = req.decision.strip().lower()
+    if decision not in {"approve", "reject", "edit"}:
+        raise HTTPException(status_code=400, detail="Decision must be 'approve', 'reject', or 'edit'.")
+
+    resolved = resolve_approval(task_id, decision=decision, edited_content=req.edited_content)
+
+    if decision == "reject":
+        return {
+            "task_id": task_id,
+            "status": "rejected",
+            "decision": "reject",
+            "message": "Document generation rejected by operator. No file generated.",
+            "filename": None,
+            "file_path": None,
+        }
+
+    # If approved or edited, now render the final downloadable .docx file
+    content_to_render = resolved["document_content"]
+    if isinstance(content_to_render, str):
+        content_to_render = {
+            "title": "Document (Edited)",
+            "sections": [{"heading": "Content", "body": content_to_render}],
+            "sources": resolved.get("sources", []),
+        }
+
+    file_path = render_docx(content_to_render)
+    filename = file_path.name
+    resolved["filename"] = filename
+    resolved["file_path"] = str(file_path)
+
+    log_event(
+        task_id=task_id,
+        event_type="write",
+        actor="writer",
+        summary=f"Rendered final approved document '{content_to_render.get('title')}' -> {filename}",
+        metadata={
+            "filename": filename,
+            "file_path": str(file_path),
+            "decision": decision,
+            "risk": resolved.get("risk"),
+        },
+        external_calls=0,
+    )
+
+    return {
+        "task_id": task_id,
+        "status": resolved["status"],
+        "decision": decision,
+        "filename": filename,
+        "file_path": str(file_path),
+        "download_url": f"/download/{filename}",
+        "title": content_to_render.get("title"),
+    }
+
+
 @app.get("/download/{filename}")
 def download_file(filename: str):
     """Serves a generated file from OUTPUTS_DIR with strict path-traversal safety."""
@@ -96,6 +187,61 @@ def download_file(filename: str):
         media_type = "application/json"
 
     return FileResponse(path=file_path, filename=filename, media_type=media_type)
+
+
+@app.get("/knowledge/list")
+def knowledge_list():
+    """Read-only: aggregates the existing FAISS metadata.json into per-document chunk counts."""
+    if not METADATA_PATH.exists():
+        return {"documents": [], "total_chunks": 0}
+
+    with open(METADATA_PATH, "r", encoding="utf-8") as f:
+        metadata = json.load(f)
+
+    counts: dict = {}
+    for entry in metadata:
+        name = entry.get("source_filename", "unknown")
+        counts[name] = counts.get(name, 0) + 1
+
+    documents = [{"filename": name, "chunk_count": count} for name, count in sorted(counts.items())]
+    return {"documents": documents, "total_chunks": len(metadata)}
+
+
+@app.post("/knowledge/upload")
+def knowledge_upload(file: UploadFile = File(...), ingest: bool = Form(True)):
+    """Saves an uploaded document and (optionally) runs it through the existing
+    Phase 4/7 ingestion pipeline. ingest=False is used by the task composer, which
+    only needs the file on disk for the ocr/vision tools to read."""
+    safe_name = Path(file.filename or "upload").name
+    suffix = Path(safe_name).suffix.lower()
+    if suffix not in SUPPORTED_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type '{suffix}'. Supported: {sorted(SUPPORTED_EXTENSIONS)}",
+        )
+
+    content = file.file.read()
+    dest = UPLOADS_DIR / safe_name
+    dest.write_bytes(content)
+
+    log_event(
+        event_type="upload",
+        actor="ui",
+        summary=f"Uploaded '{safe_name}' ({len(content)} bytes), ingest={ingest}",
+        metadata={"filename": safe_name, "bytes": len(content), "ingest": ingest, "file_path": str(dest)},
+        external_calls=0,
+    )
+
+    if not ingest:
+        return {"filename": safe_name, "file_path": str(dest), "ingested": False, "chunk_count": 0}
+
+    result = ingest_document(dest)  # logs its own "ingest" audit event
+    return {
+        "filename": safe_name,
+        "file_path": str(dest),
+        "ingested": True,
+        "chunk_count": result["chunk_count"],
+    }
 
 
 @app.get("/shield/status")

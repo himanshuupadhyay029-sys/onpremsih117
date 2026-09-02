@@ -87,7 +87,12 @@ def extract_claims(document_text: str) -> List[str]:
         raw = ollama.generate(reasoning_model, prompt)
         parsed = _parse_json_safely(raw)
         if parsed and isinstance(parsed.get("claims"), list):
-            claims = [str(c).strip() for c in parsed["claims"] if str(c).strip()]
+            raw_claims = [str(c).strip() for c in parsed["claims"] if str(c).strip()]
+            claims = [
+                c for c in raw_claims
+                if not re.match(r"^specific factual claim \d+", c, re.IGNORECASE)
+                and c.lower() not in {"specific factual claim 1", "specific factual claim 2", "claim 1", "claim 2"}
+            ]
             if claims:
                 return claims[:4]
     except Exception:

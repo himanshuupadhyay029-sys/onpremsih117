@@ -8,6 +8,7 @@ Phase 5: Word Document (.docx) writer with anti-hallucination guard.
 Phase 6: network-isolated Docker sandbox for code execution with error-feedback self-correction.
 Phase 7: OCR (reading scanned/image documents) + Vision (multimodal image/drawing analysis).
 Phase 8: Deterministic engineering math calculator (calc.py) showing real arithmetic steps.
+Phase 11: Human approval gate for high-stakes document outputs (approve.py).
 """
 
 import json
@@ -21,12 +22,13 @@ from backend.audit.logbook import log_event
 from backend.brain.router import route
 from backend.brain.state import AgentState
 from backend.engine import ollama, registry
+from backend.guard.approve import assess_risk, request_approval
 from backend.tools.calc import calculate as calc_tool
 from backend.tools.code import write_and_run as code_tool_run
 from backend.tools.ocr import extract_text as ocr_tool_extract
 from backend.tools.search import search as search_tool
 from backend.tools.vision import describe_image as vision_tool_describe
-from backend.tools.writer import write_document as writer_tool
+from backend.tools.writer import draft_document, render_docx, write_document as writer_tool
 
 MAX_TOTAL_STEPS = 10
 MAX_REVISIONS = 3
@@ -35,25 +37,29 @@ CODE_TIMEOUT_SECONDS = 15
 
 VALID_TOOLS = {"llm", "search", "calc", "vision", "document", "code", "ocr"}
 
-PLAN_PROMPT_TEMPLATE = """You are the planning module of an AI agent. Break the task below into 1 to 6 ordered steps required to complete it.
+PLAN_PROMPT_TEMPLATE = """You are the planning module of an AI agent. Break the task below into the MINIMUM number of ordered steps required to complete it.
+
+CRITICAL EFFICIENCY RULE:
+Use the fewest steps possible. Do not create more than 3 steps unless the task genuinely requires multiple distinct tool calls (e.g. search AND then draft). A simple question or search needs 1 step, not 6. Do NOT create redundant "llm" steps.
 
 Each step must be an object with:
   "step": <integer, starting at 1>
   "tool": one of ["llm", "search", "calc", "vision", "document", "code", "ocr"]
   "input": a short instruction/query for that tool
 
-Use "llm" for steps that require reasoning, writing, or explaining WITHOUT executing anything.
-Use "calc" for steps performing numerical math, formulas, or engineering calculations with step-by-step arithmetic.
-Use "code" for steps that need to generate AND ACTUALLY RUN a Python script in the secure sandbox.
-Use "search" for steps needing SOP or reference information from the Knowledge Vault.
-Use "ocr" for steps reading/extracting text from an image or scanned document file path.
-Use "vision" for steps analyzing photos, engineering drawings, diagrams, or gauges using multimodal AI.
-Use "document" for steps creating formal docx reports.
+Tool Selection Rules:
+- "search": for looking up SOPs, procedures, or facts in the Knowledge Vault. A search question needs ONLY 1 search step.
+- "document": for drafting formal Word document (.docx) reports. Typically step 1 is "search" (if SOP context is needed) and step 2 is "document".
+- "calc": for numerical math, formulas, or engineering calculations with step-by-step arithmetic.
+- "code": for generating and running Python scripts in the secure sandbox.
+- "ocr": for reading text from image/scanned document files.
+- "vision": for analyzing engineering drawings, diagrams, or gauges.
+- "llm": ONLY for general reasoning or direct questions where no specific tool is needed.
 
 Task: {task}
 Task type: {task_type}{failure_context}
 
-Respond with ONLY a raw JSON array of step objects. No prose, no markdown fences, no explanation.
+Respond with ONLY a raw JSON array of step objects. Max 3 steps (unless revising). No prose, no markdown fences, no explanation.
 """
 
 
@@ -80,8 +86,13 @@ def _normalize_tool(name: str) -> str:
     return "llm"
 
 
-def _parse_plan(raw: str, fallback_input: str) -> List[dict]:
-    """Robustly parse the planner's JSON, handling markdown-fenced output."""
+def _parse_plan(
+    raw: str,
+    fallback_input: str,
+    task_type: Optional[str] = None,
+    is_revision: bool = False,
+) -> List[dict]:
+    """Robustly parse the planner's JSON, enforcing minimum steps and soft ceilings."""
     text = (raw or "").strip()
 
     fence_match = re.search(r"```(?:json)?\s*(\[.*?\])\s*```", text, re.DOTALL)
@@ -92,21 +103,53 @@ def _parse_plan(raw: str, fallback_input: str) -> List[dict]:
         if bracket_match:
             text = bracket_match.group(1)
 
-    steps: List[dict] = []
+    # Soft ceiling: max 3 steps for document/search tasks unless revising
+    max_steps = 3 if (task_type in {"document", "search"} and not is_revision) else 6
+
+    parsed_steps: List[dict] = []
     try:
         parsed = json.loads(text)
         if isinstance(parsed, list):
-            for i, item in enumerate(parsed[:6]):
+            for item in parsed[:max_steps]:
                 if not isinstance(item, dict):
                     continue
                 tool = _normalize_tool(item.get("tool", "llm"))
                 step_input = str(item.get("input", fallback_input))
-                steps.append({"step_num": i + 1, "tool": tool, "input": step_input, "status": "pending"})
+                parsed_steps.append({"tool": tool, "input": step_input})
     except (json.JSONDecodeError, TypeError):
-        steps = []
+        parsed_steps = []
 
-    if not steps:
-        steps = [{"step_num": 1, "tool": "llm", "input": fallback_input, "status": "pending"}]
+    # Sanity checks:
+    # 1. Collapse consecutive duplicate "llm" steps
+    collapsed: List[dict] = []
+    for s in parsed_steps:
+        if collapsed and s["tool"] == "llm" and collapsed[-1]["tool"] == "llm":
+            continue
+        collapsed.append(s)
+
+    # 2. Task-type integrity
+    if task_type == "search":
+        for s in collapsed:
+            if s["tool"] == "document":
+                s["tool"] = "search"
+    elif task_type == "document" and collapsed:
+        if not any(s["tool"] == "document" for s in collapsed):
+            collapsed[-1]["tool"] = "document"
+
+    # 3. If empty, fallback to single step
+    if not collapsed:
+        fallback_tool = "document" if task_type == "document" else ("search" if task_type == "search" else "llm")
+        collapsed = [{"tool": fallback_tool, "input": fallback_input}]
+
+    # Format numbered steps
+    steps: List[dict] = []
+    for i, s in enumerate(collapsed[:max_steps]):
+        steps.append({
+            "step_num": i + 1,
+            "tool": s["tool"],
+            "input": s["input"],
+            "status": "pending",
+        })
 
     return steps
 
@@ -139,7 +182,10 @@ def plan_node(state: AgentState) -> dict:
                 "regenerates and re-runs a corrected script accomplishing the same task."
             )
         elif last["tool"] == "search":
-            guidance = "Revise the plan to either use broader search keywords or proceed to document the missing documentation."
+            if state["routing_decision"].get("task_type") == "document":
+                guidance = "Revise the plan to either use broader search keywords or proceed to document the missing documentation."
+            else:
+                guidance = "Revise the plan to use broader or alternative search keywords to answer the query directly."
         elif last["tool"] == "calc":
             guidance = "The calculation failed or had missing inputs. Revise the plan to search/extract the missing values first."
         else:
@@ -171,7 +217,12 @@ def plan_node(state: AgentState) -> dict:
         raw = ""
         thought = {"role": "thought", "content": f"Planning LLM call failed ({exc}); using single-step fallback plan."}
 
-    steps = _parse_plan(raw, fallback_input=state["original_task"])
+    steps = _parse_plan(
+        raw,
+        fallback_input=state["original_task"],
+        task_type=state["routing_decision"].get("task_type"),
+        is_revision=is_revision,
+    )
     action = {"role": "action", "content": f"Generated plan: {json.dumps(steps)}"}
 
     log_event(
@@ -356,27 +407,66 @@ def execute_node(state: AgentState) -> dict:
             is_doc_grounded = True
 
         try:
-            doc_res = writer_tool(
+            # Produce structured JSON draft first
+            structured = draft_document(
                 step_input,
                 sources=prior_sources if is_doc_grounded else [],
                 is_grounded=is_doc_grounded,
-                task_id=state.get("task_id"),
             )
-            sections_list = doc_res["structured_content"].get("sections", [])
-            output = (
-                f"Generated document '{doc_res['title']}' saved to {doc_res['filename']}.\n"
-                f"File path: {doc_res['file_path']}\n"
-                f"Grounded in SOPs: {is_doc_grounded}\n"
-                f"Sections: {', '.join(s.get('heading', '') for s in sections_list)}"
+            title = structured.get("title", "Technical Document")
+            sections_list = structured.get("sections", [])
+            sources = structured.get("sources", [])
+
+            # Assess risk using Phase 11 heuristic
+            risk_info = assess_risk(
+                task_type="document",
+                document_content=structured,
+                sources_used=prior_sources if is_doc_grounded else [],
             )
-            is_error = False
-            sources = doc_res["structured_content"].get("sources", [])
-            doc_meta = {
-                "file_path": doc_res["file_path"],
-                "filename": doc_res["filename"],
-                "title": doc_res["title"],
-                "grounded": is_doc_grounded,
-            }
+
+            # Check if approval is required (medium or high risk)
+            if risk_info.get("risk") in {"medium", "high"}:
+                task_id = state.get("task_id") or str(uuid.uuid4())
+                request_approval(
+                    task_id=task_id,
+                    document_content=structured,
+                    risk_assessment=risk_info,
+                    sources=prior_sources if is_doc_grounded else [],
+                )
+                output = (
+                    f"Drafted document '{title}' (Risk: {risk_info['risk'].upper()}, "
+                    f"Confidence: {risk_info['confidence'] * 100:.0f}%).\n"
+                    f"Reasoning: {risk_info['reasoning']}\n"
+                    f"Sections: {', '.join(s.get('heading', '') for s in sections_list)}\n"
+                    f"Status: PAUSED for human approval before rendering final .docx."
+                )
+                is_error = False
+                doc_meta = {
+                    "title": title,
+                    "grounded": is_doc_grounded,
+                    "awaiting_approval": True,
+                    "risk": risk_info["risk"],
+                    "confidence": risk_info["confidence"],
+                    "reasoning": risk_info["reasoning"],
+                    "draft_content": structured,
+                }
+            else:
+                # Low risk document: render docx immediately
+                file_path = render_docx(structured)
+                output = (
+                    f"Generated document '{title}' saved to {file_path.name}.\n"
+                    f"File path: {file_path}\n"
+                    f"Grounded in SOPs: {is_doc_grounded}\n"
+                    f"Sections: {', '.join(s.get('heading', '') for s in sections_list)}"
+                )
+                is_error = False
+                doc_meta = {
+                    "file_path": str(file_path),
+                    "filename": file_path.name,
+                    "title": title,
+                    "grounded": is_doc_grounded,
+                    "awaiting_approval": False,
+                }
         except Exception as exc:  # noqa: BLE001
             output = f"[error] document generation failed: {exc}"
             is_error = True
@@ -444,6 +534,24 @@ def observe_node(state: AgentState) -> dict:
             f"{'ERROR' if is_error else ('UNGROUNDED' if is_ungrounded_search else 'OK')}: {last_output['output'][:200]}",
         }
     ]
+
+    # Check for approval gate pause
+    if last_output.get("tool") == "document" and last_output.get("awaiting_approval"):
+        trace_entries.append(
+            {
+                "role": "thought",
+                "content": f"Document draft '{last_output.get('title')}' requires human approval ({last_output.get('risk')} risk). Pausing agent.",
+            }
+        )
+        log_event(
+            task_id=state.get("task_id"),
+            event_type="observe",
+            actor="agent_loop",
+            summary=f"Document '{last_output.get('title')}' paused for human approval (Risk: {last_output.get('risk')}).",
+            metadata={"decision": "awaiting_approval", "risk": last_output.get("risk")},
+            external_calls=0,
+        )
+        return {"trace": trace_entries, "status": "awaiting_approval"}
 
     if total_executed >= MAX_TOTAL_STEPS:
         status = "failed" if is_error else "complete"
@@ -531,6 +639,33 @@ def finalize_node(state: AgentState) -> dict:
     role = state["routing_decision"]["model_role"]
     model = registry.get_model(role)
     failed = state["status"] == "failed"
+    awaiting_approval = state["status"] == "awaiting_approval"
+
+    if awaiting_approval:
+        last = state["step_outputs"][-1]
+        final_answer = (
+            f"Draft document '{last.get('title', 'Document')}' has been prepared and paused for human review.\n\n"
+            f"Risk Level: {str(last.get('risk', 'medium')).capitalize()}\n"
+            f"Confidence: {float(last.get('confidence', 0.5)) * 100:.0f}%\n"
+            f"Reasoning: {last.get('reasoning', '')}\n\n"
+            f"Please approve, edit, or reject the draft to proceed with final file delivery."
+        )
+        thought = {"role": "thought", "content": "Document draft prepared; awaiting human approval."}
+        observation = {"role": "observation", "content": f"Final answer: {final_answer[:300]}"}
+        log_event(
+            task_id=state.get("task_id"),
+            event_type="complete",
+            actor=model,
+            summary=f"Task paused awaiting human approval for '{last.get('title')}'.",
+            metadata={"status": "awaiting_approval", "risk": last.get("risk")},
+            external_calls=0,
+        )
+        return {
+            "trace": [thought, observation],
+            "status": "awaiting_approval",
+            "final_answer": final_answer,
+            "messages": [{"role": "assistant", "content": final_answer}],
+        }
 
     outputs_summary = "\n".join(
         f"Step {o['step_num']} ({o['tool']}): {o['output']}" for o in state["step_outputs"]
@@ -598,7 +733,13 @@ def build_graph():
     graph.add_conditional_edges(
         "observe",
         route_after_observe,
-        {"executing": "execute", "revising": "plan", "complete": "finalize", "failed": "finalize"},
+        {
+            "executing": "execute",
+            "revising": "plan",
+            "complete": "finalize",
+            "failed": "finalize",
+            "awaiting_approval": "finalize",
+        },
     )
     graph.add_edge("finalize", END)
     return graph.compile()
@@ -659,10 +800,20 @@ def run_agent(task: str, attachment_type: Optional[str] = None, task_id: Optiona
     sources_used: List[dict] = []
     generated_files: List[dict] = []
     code_runs: List[dict] = []
+    approval_info = None
+    draft_content = None
+
     for step_output in final_state["step_outputs"]:
         if "sources" in step_output and step_output["sources"]:
             sources_used.extend(step_output["sources"])
-        if "file_path" in step_output:
+        if step_output.get("awaiting_approval"):
+            approval_info = {
+                "risk": step_output.get("risk"),
+                "confidence": step_output.get("confidence"),
+                "reasoning": step_output.get("reasoning"),
+            }
+            draft_content = step_output.get("draft_content")
+        if "file_path" in step_output and not step_output.get("awaiting_approval"):
             generated_files.append({
                 "filename": step_output.get("filename"),
                 "file_path": step_output.get("file_path"),
@@ -680,7 +831,7 @@ def run_agent(task: str, attachment_type: Optional[str] = None, task_id: Optiona
                 "error": step_output.get("error"),
             })
 
-    return {
+    result_payload = {
         "task_id": task_id,
         "task": task,
         "routing_decision": final_state["routing_decision"],
@@ -694,3 +845,8 @@ def run_agent(task: str, attachment_type: Optional[str] = None, task_id: Optiona
         "status": final_state["status"],
         "model_used": model_used,
     }
+    if approval_info:
+        result_payload["approval"] = approval_info
+        result_payload["draft_content"] = draft_content
+
+    return result_payload
