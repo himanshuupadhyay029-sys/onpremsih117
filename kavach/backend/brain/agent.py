@@ -12,6 +12,8 @@ Phase 11: Human approval gate for high-stakes document outputs (approve.py).
 """
 
 import json
+import logging
+from pathlib import Path
 import re
 from typing import List, Optional, Tuple
 import uuid
@@ -29,6 +31,10 @@ from backend.tools.ocr import extract_text as ocr_tool_extract
 from backend.tools.search import search as search_tool
 from backend.tools.vision import describe_image as vision_tool_describe
 from backend.tools.writer import draft_document, render_docx, write_document as writer_tool
+
+logger = logging.getLogger("kavach.agent")
+if not logger.handlers:
+    logging.basicConfig(level=logging.INFO)
 
 MAX_TOTAL_STEPS = 10
 MAX_REVISIONS = 3
@@ -135,10 +141,17 @@ def _parse_plan(
     elif task_type == "document" and collapsed:
         if not any(s["tool"] == "document" for s in collapsed):
             collapsed[-1]["tool"] = "document"
+    elif task_type == "vision" and collapsed:
+        if not any(s["tool"] == "vision" for s in collapsed):
+            collapsed[0]["tool"] = "vision"
 
     # 3. If empty, fallback to single step
     if not collapsed:
-        fallback_tool = "document" if task_type == "document" else ("search" if task_type == "search" else "llm")
+        fallback_tool = (
+            "document"
+            if task_type == "document"
+            else ("search" if task_type == "search" else ("vision" if task_type == "vision" else "llm"))
+        )
         collapsed = [{"tool": fallback_tool, "input": fallback_input}]
 
     # Format numbered steps
@@ -333,18 +346,44 @@ def execute_node(state: AgentState) -> dict:
         actor = registry.get_model("vision")
         sources = None
         try:
-            target_str = step_input.strip()
+            raw_input = step_input.strip()
+            target_str = raw_input
             q_target = None
-            if "|" in target_str:
-                parts = target_str.split("|", 1)
+            if "|" in raw_input:
+                parts = raw_input.split("|", 1)
                 target_str = parts[0].strip()
                 q_target = parts[1].strip()
 
-            vis_res = vision_tool_describe(target_str, question=q_target, task_id=state.get("task_id"))
+            # Check if target_str is already a path or if we need to extract from text/task
+            img_path_to_use = target_str
+            img_pattern = r"([A-Za-z]:\\[^\r\n<>:\"|?*]+\.(?:png|jpg|jpeg|bmp|tiff|webp)|\S+\.(?:png|jpg|jpeg|bmp|tiff|webp))"
+            
+            # If target_str doesn't exist directly, search in target_str or original_task
+            try:
+                from backend.tools.vision import _resolve_image_path
+                img_path_to_use = str(_resolve_image_path(target_str))
+            except Exception:
+                # Look for an image filename / path match in raw_input
+                m = re.search(img_pattern, raw_input, re.IGNORECASE)
+                if m:
+                    img_path_to_use = m.group(1).strip()
+                    if not q_target:
+                        q_target = raw_input.replace(m.group(0), "").replace("Attached file:", "").strip() or None
+                else:
+                    # Look in original_task
+                    m_orig = re.search(img_pattern, state.get("original_task", ""), re.IGNORECASE)
+                    if m_orig:
+                        img_path_to_use = m_orig.group(1).strip()
+                        if not q_target:
+                            q_target = raw_input.replace("Attached file:", "").strip() or None
+
+            logger.info(f"[AGENT] Invoking vision tool with image={img_path_to_use}, question={q_target}")
+            vis_res = vision_tool_describe(img_path_to_use, question=q_target, task_id=state.get("task_id"))
             output = vis_res["description"]
             is_error = False
             extra_meta = {"image_path": vis_res["image_path"], "question": q_target}
         except Exception as exc:
+            logger.error(f"[AGENT] Vision tool failed: {exc}")
             output = f"[error] Vision analysis failed: {exc}"
             is_error = True
     elif tool == "code":
@@ -758,9 +797,19 @@ def run_agent(task: str, attachment_type: Optional[str] = None, task_id: Optiona
     if not task_id:
         task_id = str(uuid.uuid4())
 
+    has_img_signal = bool(
+        attachment_type in ("image", "photo", "picture", "file")
+        or any(ext in (task or "").lower() for ext in (".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".webp"))
+    )
+    logger.info(f"[ROUTER] Message has attachment: {has_img_signal} (attachment_type={attachment_type})")
+
     routing_decision = route(task, attachment_type=attachment_type)
     model_role = routing_decision.model_role
     model_tag = registry.get_model(model_role)
+
+    logger.info(f"[ROUTER] Selected task_type='{routing_decision.task_type}', model_role='{model_role}' ({model_tag})")
+    if has_img_signal and routing_decision.task_type != "vision":
+        logger.warning(f"[ROUTER] MISROUTE - image detected but routed to {routing_decision.task_type}")
 
     log_event(
         task_id=task_id,

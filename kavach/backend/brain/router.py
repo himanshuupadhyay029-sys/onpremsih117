@@ -124,18 +124,25 @@ def _llm_classify(task: str) -> str:
     return "document"
 
 
+IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".webp")
+
+
 def route(task: str, attachment_type: Optional[str] = None) -> RoutingDecision:
     """Rule-based router. Returns a RoutingDecision with an explainable reason."""
     task_lower = (task or "").lower()
 
-    # Strong structural signal: an image attachment means vision, no ambiguity.
-    if attachment_type and attachment_type.lower() in ("image", "photo", "picture"):
+    # Strong structural signal: an image attachment or image filename means vision, no ambiguity.
+    has_image_ext = any(ext in task_lower for ext in IMAGE_EXTENSIONS)
+    is_image_attachment = bool(attachment_type and attachment_type.lower() in ("image", "photo", "picture"))
+
+    if is_image_attachment or has_image_ext:
         task_type = "vision"
+        reason_detail = f"attachment_type='{attachment_type}'" if is_image_attachment else "image file extension detected in task"
         return RoutingDecision(
             task_type=task_type,
             model_role=MODEL_ROLE_BY_TASK_TYPE[task_type],
             tools_needed=TOOLS_BY_TASK_TYPE[task_type],
-            reason=f"attachment_type='{attachment_type}' deterministically routes to vision",
+            reason=f"{reason_detail} deterministically routes to vision",
         )
 
     scores = _score_task(task_lower)

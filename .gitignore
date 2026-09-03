@@ -27,9 +27,28 @@ audit_log.jsonl
 *.xlsx
 *.log
 
+# Node modules & frontend build cache
+node_modules/
+kavach/frontend-react/node_modules/
+.vite/
+kavach/frontend-react/node_modules/.vite/
+*.local
+
+# Uploaded test files & runtime documents
+knowledge/uploads/
+kavach/knowledge/uploads/
+testdata/synthetic_scans/
+kavach/testdata/synthetic_scans/
+
+# Documentation ignored per user request
+TECHNICAL_CONTEXT.md
+kavach/TECHNICAL_CONTEXT.md
+kavach/test_vision_fix.py
+
 # IDE & OS files
 .vscode/
 .idea/
 .DS_Store
 Thumbs.db
 *.tmp
+
