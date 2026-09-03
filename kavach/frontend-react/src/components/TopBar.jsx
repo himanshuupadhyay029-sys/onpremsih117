@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 
-export default function TopBar() {
+export default function TopBar({ sidebarCollapsed, onToggleSidebar }) {
   const [externalCount, setExternalCount] = useState(null);
   const [monitorStatus, setMonitorStatus] = useState('Connecting to monitor…');
   const [lockdownOn, setLockdownOn] = useState(false);
@@ -97,33 +97,51 @@ export default function TopBar() {
 
   return (
     <header className="topbar">
-      <div className="sovereignty" title="Live connection monitor">
-        <span
-          className={`dot ${isSafe ? 'is-safe' : ''} ${isAlert ? 'is-alert' : ''}`}
-          id="sov-dot"
-        />
-        <span id="sov-text">{monitorStatus}</span>
+      <div className="topbar-left">
+        {sidebarCollapsed && (
+          <button
+            className="sidebar-expand-btn"
+            onClick={onToggleSidebar}
+            title="Open sidebar"
+            aria-label="Open sidebar"
+          >
+            <svg className="icon" viewBox="0 0 24 24">
+              <rect x="3" y="4" width="18" height="16" rx="2" />
+              <path d="M9 4v16" />
+            </svg>
+          </button>
+        )}
       </div>
 
-      <button
-        className={`lock-toggle ${lockdownOn ? 'is-on' : ''}`}
-        onClick={handleToggleLockdown}
-        disabled={isLocking}
-      >
-        <svg className="icon icon-sm" viewBox="0 0 24 24">
-          <rect x="5" y="11" width="14" height="9" rx="2" />
-          <path d="M8 11V8a4 4 0 118 0v3" />
-        </svg>
-        <span>
-          {isLocking
-            ? lockdownOn
-              ? 'Unlocking…'
-              : 'Locking down…'
-            : lockdownOn
-            ? 'Lockdown on'
-            : 'Lockdown off'}
-        </span>
-      </button>
+      <div className="topbar-right">
+        <div className="sovereignty" title="Live connection monitor">
+          <span
+            className={`dot ${isSafe ? 'is-safe' : ''} ${isAlert ? 'is-alert' : ''}`}
+            id="sov-dot"
+          />
+          <span id="sov-text">{monitorStatus}</span>
+        </div>
+
+        <button
+          className={`lock-toggle ${lockdownOn ? 'is-on' : ''}`}
+          onClick={handleToggleLockdown}
+          disabled={isLocking}
+        >
+          <svg className="icon icon-sm" viewBox="0 0 24 24">
+            <rect x="5" y="11" width="14" height="9" rx="2" />
+            <path d="M8 11V8a4 4 0 118 0v3" />
+          </svg>
+          <span>
+            {isLocking
+              ? lockdownOn
+                ? 'Unlocking…'
+                : 'Locking down…'
+              : lockdownOn
+              ? 'Lockdown on'
+              : 'Lockdown off'}
+          </span>
+        </button>
+      </div>
 
       {inlineNote && <div className="inline-note">{inlineNote}</div>}
     </header>

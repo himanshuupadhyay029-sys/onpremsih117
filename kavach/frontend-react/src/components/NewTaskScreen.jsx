@@ -17,10 +17,74 @@ const TOOL_LABELS = {
   document: 'Document writer',
 };
 
+const GREETINGS = [
+  "Where should we begin?",
+  "Ready when you are.",
+  "What's the task at hand?",
+  "SOPs, a calculation, or a report?",
+  "How can I help, Operator?",
+];
+
+const SUGGESTION_CHIPS = [
+  {
+    label: "Search SOPs",
+    prefill: "Search the knowledge vault for ",
+    icon: (
+      <svg className="icon icon-sm" viewBox="0 0 24 24">
+        <circle cx="11" cy="11" r="7" />
+        <path d="M21 21l-4.3-4.3" />
+      </svg>
+    ),
+  },
+  {
+    label: "Calculate",
+    prefill: "Calculate ",
+    icon: (
+      <svg className="icon icon-sm" viewBox="0 0 24 24">
+        <rect x="4" y="3" width="16" height="18" rx="2" />
+        <path d="M8 7h8M8 11h.01M12 11h.01M8 15h.01M12 15h.01M16 15h.01" />
+      </svg>
+    ),
+  },
+  {
+    label: "Draft Report",
+    prefill: "Draft a formal report on ",
+    icon: (
+      <svg className="icon icon-sm" viewBox="0 0 24 24">
+        <path d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8l-5-5z" />
+        <path d="M14 3v5h5" />
+      </svg>
+    ),
+  },
+  {
+    label: "Run Code",
+    prefill: "Write and run a Python script to ",
+    icon: (
+      <svg className="icon icon-sm" viewBox="0 0 24 24">
+        <path d="M8 6L3 12l5 6M16 6l5 6-5 6" />
+      </svg>
+    ),
+  },
+  {
+    label: "Analyze Scan",
+    prefill: "Analyze this scanned document: ",
+    icon: (
+      <svg className="icon icon-sm" viewBox="0 0 24 24">
+        <rect x="3" y="3" width="18" height="18" rx="2" />
+        <circle cx="9" cy="9" r="2" />
+        <path d="M21 15l-5-5L5 21" />
+      </svg>
+    ),
+  },
+];
+
 export default function NewTaskScreen({ setIsThinking }) {
   const [taskInput, setTaskInput] = useState('');
   const [attachedFile, setAttachedFile] = useState(null);
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
+  const [greeting] = useState(() => {
+    return GREETINGS[Math.floor(Math.random() * GREETINGS.length)];
+  });
 
   // Execution state
   const [hasRun, setHasRun] = useState(false);
@@ -43,6 +107,23 @@ export default function NewTaskScreen({ setIsThinking }) {
   const pollTimerRef = useRef(null);
   const tickerRef = useRef(null);
   const startTimeRef = useRef(0);
+
+  const handleChipClick = (prefill) => {
+    setTaskInput(prefill);
+    if (textareaRef.current) {
+      textareaRef.current.focus();
+      setTimeout(() => {
+        if (textareaRef.current) {
+          textareaRef.current.style.height = 'auto';
+          textareaRef.current.style.height = `${Math.min(
+            textareaRef.current.scrollHeight,
+            220
+          )}px`;
+          textareaRef.current.setSelectionRange(prefill.length, prefill.length);
+        }
+      }, 0);
+    }
+  };
 
   // Adjust textarea height
   const handleInputChange = (e) => {
@@ -375,14 +456,20 @@ export default function NewTaskScreen({ setIsThinking }) {
   }, [resultData]);
 
   return (
-    <section className="screen">
-      <div className={`greeting-wrap ${hasRun ? 'is-compact' : ''}`}>
-        <h1 className="greeting">Where should we begin?</h1>
+    <section className={`screen screen-task-container ${hasRun ? 'has-run' : ''}`} id="screen-task">
+      <div className={`greeting-wrap ${hasRun ? 'is-compact' : ''}`} id="greeting-wrap">
+        <h1 className="greeting">
+          <svg className="greeting-icon icon" viewBox="0 0 24 24">
+            <path d="M12 3l7 3v5.5c0 4.2-2.9 8.1-7 9.5-4.1-1.4-7-5.3-7-9.5V6l7-3z" />
+          </svg>
+          <span id="greeting-text">{greeting}</span>
+        </h1>
       </div>
 
       <div className="composer">
         <textarea
           ref={textareaRef}
+          id="task-input"
           rows={1}
           placeholder="Ask about an SOP, run a calculation, or draft a report…"
           value={taskInput}
@@ -392,12 +479,13 @@ export default function NewTaskScreen({ setIsThinking }) {
         />
 
         {attachedFile && (
-          <div className="attachment">
+          <div className="attachment" id="attachment">
             <svg className="icon icon-sm" viewBox="0 0 24 24">
               <path d="M14 4l-7.5 7.5a3 3 0 004.2 4.2L18 8.5" />
             </svg>
-            <span>{attachedFile.name}</span>
+            <span id="attachment-name">{attachedFile.name}</span>
             <button
+              id="attachment-clear"
               onClick={() => setAttachedFile(null)}
               title="Remove attachment"
             >
@@ -410,17 +498,19 @@ export default function NewTaskScreen({ setIsThinking }) {
 
         <div className="composer-bar">
           <button
-            className="ghost-btn"
+            className="composer-plus-btn"
+            id="attach-btn"
             onClick={() => fileInputRef.current?.click()}
             disabled={running || uploadingAttachment}
+            title="Attach a file"
           >
-            <svg className="icon icon-sm" viewBox="0 0 24 24">
-              <path d="M14 4l-7.5 7.5a3 3 0 004.2 4.2L18 8.5" />
+            <svg className="icon" viewBox="0 0 24 24">
+              <path d="M12 5v14M5 12h14" />
             </svg>
-            <span>Attach</span>
           </button>
           <input
             type="file"
+            id="file-input"
             ref={fileInputRef}
             onChange={handleFileChange}
             hidden
@@ -430,6 +520,7 @@ export default function NewTaskScreen({ setIsThinking }) {
 
           <button
             className="send-btn"
+            id="send-btn"
             onClick={runTask}
             disabled={!taskInput.trim() || running}
             title="Run task"
@@ -440,6 +531,21 @@ export default function NewTaskScreen({ setIsThinking }) {
           </button>
         </div>
       </div>
+
+      {!hasRun && (
+        <div className="suggestion-chips" id="suggestion-chips">
+          {SUGGESTION_CHIPS.map((chip) => (
+            <button
+              key={chip.label}
+              className="chip"
+              onClick={() => handleChipClick(chip.prefill)}
+            >
+              {chip.icon}
+              <span>{chip.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
 
       {hasRun && (
         <div className="run">

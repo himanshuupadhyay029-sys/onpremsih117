@@ -21,6 +21,33 @@ const TOOL_LABELS = {
   document: "Document writer",
 };
 
+/* ------------------------------------------------------- sidebar toggle */
+const appRoot = document.getElementById("app-root");
+let sidebarCollapsed = localStorage.getItem("kavach_sidebar_collapsed") === "1";
+
+function applySidebarState() {
+  appRoot.classList.toggle("sidebar-collapsed", sidebarCollapsed);
+}
+$("sidebar-toggle").addEventListener("click", () => {
+  sidebarCollapsed = !sidebarCollapsed;
+  localStorage.setItem("kavach_sidebar_collapsed", sidebarCollapsed ? "1" : "0");
+  applySidebarState();
+});
+applySidebarState();
+
+/* --------------------------------------------------- rotating greeting */
+const GREETINGS = [
+  "Where should we begin?",
+  "Ready when you are.",
+  "What's the task at hand?",
+  "SOPs, a calculation, or a report?",
+  "How can I help, Operator?",
+];
+const greetingText = $("greeting-text");
+if (greetingText) {
+  greetingText.textContent = GREETINGS[Math.floor(Math.random() * GREETINGS.length)];
+}
+
 /* ------------------------------------------------------------ navigation */
 
 document.querySelectorAll(".nav-item").forEach((btn) => {
@@ -154,6 +181,17 @@ $("attachment-clear").addEventListener("click", () => {
 });
 
 $("send-btn").addEventListener("click", runTask);
+
+/* ----------------------------------------------------- suggestion chips */
+document.querySelectorAll(".chip").forEach((chip) => {
+  chip.addEventListener("click", () => {
+    input.value = chip.dataset.prefill;
+    input.dispatchEvent(new Event("input"));
+    input.focus();
+    const len = input.value.length;
+    input.setSelectionRange(len, len);
+  });
+});
 
 /* -------------------------------------------------------------- the run */
 

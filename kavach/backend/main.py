@@ -41,11 +41,15 @@ from backend.shield.monitor import (
 
 app = FastAPI(title="KAVACH", description="Phase 10: Frontend UI + Sovereignty Proof + Agent Brain")
 
-FRONTEND_DIR = config.PROJECT_ROOT / "frontend-react" / "dist"
+VANILLA_FRONTEND_DIR = config.PROJECT_ROOT / "frontend"
+REACT_FRONTEND_DIR = config.PROJECT_ROOT / "frontend-react" / "dist"
 UPLOADS_DIR = config.PROJECT_ROOT / "knowledge" / "uploads"
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
-app.mount("/assets", StaticFiles(directory=str(FRONTEND_DIR / "assets")), name="assets")
+if (REACT_FRONTEND_DIR / "assets").exists():
+    app.mount("/assets", StaticFiles(directory=str(REACT_FRONTEND_DIR / "assets")), name="assets")
+if VANILLA_FRONTEND_DIR.exists():
+    app.mount("/static", StaticFiles(directory=str(VANILLA_FRONTEND_DIR)), name="static")
 
 
 @app.on_event("startup")
@@ -66,8 +70,16 @@ class RunRequest(BaseModel):
 
 @app.get("/")
 def ui_root():
-    """Serves the Phase 10 UI shell."""
-    return FileResponse(FRONTEND_DIR / "index.html")
+    """Serves the primary React frontend UI shell."""
+    if REACT_FRONTEND_DIR.exists() and (REACT_FRONTEND_DIR / "index.html").exists():
+        return FileResponse(REACT_FRONTEND_DIR / "index.html")
+    return FileResponse(VANILLA_FRONTEND_DIR / "index.html")
+
+
+@app.get("/vanilla")
+def vanilla_ui():
+    """Serves the legacy vanilla frontend."""
+    return FileResponse(VANILLA_FRONTEND_DIR / "index.html")
 
 
 @app.get("/health")

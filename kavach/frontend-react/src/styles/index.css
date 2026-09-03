@@ -78,28 +78,69 @@ a:hover { color: var(--kavach-accent-hover); text-decoration: underline; }
 /* ------------------------------------------------------------- layout --- */
 
 .app {
-  display: grid;
-  grid-template-columns: 236px 1fr;
+  display: flex;
   height: 100vh;
+  width: 100vw;
+  overflow: hidden;
 }
 
 /* ------------------------------------------------------------ sidebar --- */
 
 .sidebar {
+  width: 240px;
+  flex-shrink: 0;
   background: var(--bg-sidebar);
   border-right: 1px solid var(--border);
-  padding: 22px 12px;
+  padding: 18px 12px;
   display: flex;
   flex-direction: column;
-  gap: 28px;
-  overflow-y: auto;
+  gap: 24px;
+  overflow: hidden;
+  transition: width 240ms cubic-bezier(0.4, 0, 0.2, 1),
+              padding 240ms cubic-bezier(0.4, 0, 0.2, 1),
+              opacity 200ms ease;
+}
+
+.app.sidebar-collapsed .sidebar {
+  width: 0;
+  padding-left: 0;
+  padding-right: 0;
+  border-right-color: transparent;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.sidebar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 4px;
+}
+
+.sidebar-collapse-btn,
+.sidebar-expand-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: background var(--ease), color var(--ease);
+}
+.sidebar-collapse-btn:hover,
+.sidebar-expand-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
 }
 
 .wordmark {
   display: flex;
   align-items: center;
   gap: 9px;
-  padding: 0 10px;
+  padding: 0 6px;
   color: var(--text-primary);
 }
 .wordmark .icon {
@@ -157,20 +198,37 @@ a:hover { color: var(--kavach-accent-hover); text-decoration: underline; }
 /* --------------------------------------------------------------- main --- */
 
 .main {
+  flex: 1;
+  min-width: 0;
+  height: 100vh;
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  background: var(--bg-page);
   overflow: hidden;
 }
 
 .topbar {
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 16px 36px;
+  justify-content: space-between;
+  padding: 14px 28px;
   border-bottom: 1px solid var(--hairline);
   background: var(--bg-page);
   flex-shrink: 0;
+  width: 100%;
+}
+
+.topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-left: auto;
 }
 
 .sovereignty {
@@ -232,36 +290,72 @@ a:hover { color: var(--kavach-accent-hover); text-decoration: underline; }
 
 .screens {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
-  padding: 36px;
+  display: flex;
+  flex-direction: column;
+  padding: 0 28px 28px;
 }
 
 .screen {
   max-width: 720px;
+  width: 100%;
   margin: 0 auto;
 }
 .screen-wide { max-width: 900px; }
+
+.screen-task-container {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: stretch;
+  max-width: 720px;
+  width: 100%;
+  margin: 0 auto;
+  padding-bottom: 40px;
+}
+.screen-task-container.has-run {
+  justify-content: flex-start;
+  padding-top: 16px;
+  padding-bottom: 60px;
+}
 
 /* ----------------------------------------------------------- composer --- */
 
 .greeting-wrap {
   text-align: center;
-  margin-bottom: 28px;
+  margin-bottom: 24px;
   transition: all 260ms ease;
 }
 .greeting-wrap.is-compact {
   margin-bottom: 14px;
 }
 .greeting {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
   font-family: var(--font-serif);
-  font-size: 32px;
+  font-size: 36px;
   font-weight: 400;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.015em;
   color: var(--text-primary);
   margin: 0;
 }
+.greeting-icon {
+  width: 28px;
+  height: 28px;
+  stroke: var(--kavach-accent);
+  flex: none;
+}
 .greeting-wrap.is-compact .greeting {
-  font-size: 20px;
+  font-size: 22px;
+}
+.greeting-wrap.is-compact .greeting-icon {
+  width: 20px;
+  height: 20px;
 }
 
 .composer {
@@ -328,6 +422,58 @@ a:hover { color: var(--kavach-accent-hover); text-decoration: underline; }
   transition: background var(--ease), color var(--ease);
 }
 .ghost-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+.composer-plus-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  background: transparent;
+  cursor: pointer;
+  transition: background var(--ease), color var(--ease), border-color var(--ease);
+}
+.composer-plus-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: rgba(0, 0, 0, 0.2);
+}
+.composer-plus-btn .icon {
+  width: 16px;
+  height: 16px;
+}
+
+.suggestion-chips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 18px;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background var(--ease), color var(--ease), box-shadow var(--ease), transform var(--ease);
+}
+.chip:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-soft);
+  transform: translateY(-1px);
+}
+.chip .icon {
+  color: var(--text-tertiary);
+}
 
 .composer-spacer { flex: 1; }
 

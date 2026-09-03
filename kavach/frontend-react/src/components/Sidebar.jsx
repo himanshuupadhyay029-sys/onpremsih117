@@ -1,13 +1,26 @@
 import React from 'react';
 
-export default function Sidebar({ activeScreen, onSelectScreen, isThinking }) {
+export default function Sidebar({ activeScreen, onSelectScreen, isThinking, collapsed, onToggle }) {
   return (
-    <aside className="sidebar">
-      <div className={`wordmark ${isThinking ? 'is-thinking' : ''}`} id="wordmark">
-        <svg className="icon" viewBox="0 0 24 24">
-          <path d="M12 3l7 3v5.5c0 4.2-2.9 8.1-7 9.5-4.1-1.4-7-5.3-7-9.5V6l7-3z" />
-        </svg>
-        <span className="wordmark-text">KAVACH</span>
+    <aside className="sidebar" id="sidebar">
+      <div className="sidebar-head">
+        <div className={`wordmark ${isThinking ? 'is-thinking' : ''}`} id="wordmark">
+          <svg className="icon" viewBox="0 0 24 24">
+            <path d="M12 3l7 3v5.5c0 4.2-2.9 8.1-7 9.5-4.1-1.4-7-5.3-7-9.5V6l7-3z" />
+          </svg>
+          <span className="wordmark-text">KAVACH</span>
+        </div>
+        <button
+          className="sidebar-collapse-btn"
+          onClick={onToggle}
+          title="Close sidebar"
+          aria-label="Close sidebar"
+        >
+          <svg className="icon" viewBox="0 0 24 24">
+            <rect x="3" y="4" width="18" height="16" rx="2" />
+            <path d="M9 4v16" />
+          </svg>
+        </button>
       </div>
 
       <nav className="nav">

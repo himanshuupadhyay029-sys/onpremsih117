@@ -11,10 +11,11 @@
 </head>
 <body>
 
-<div class="app">
-
-  <!-- ------------------------------------------------------------ sidebar -->
-  <aside class="sidebar">
+<div class="app" id="app-root">
+  <button class="sidebar-toggle" id="sidebar-toggle" title="Toggle sidebar" aria-label="Toggle sidebar">
+    <svg class="icon" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg>
+  </button>
+  <aside class="sidebar" id="sidebar">
     <div class="wordmark" id="wordmark">
       <svg class="icon" viewBox="0 0 24 24"><path d="M12 3l7 3v5.5c0 4.2-2.9 8.1-7 9.5-4.1-1.4-7-5.3-7-9.5V6l7-3z"/></svg>
       <span class="wordmark-text">KAVACH</span>
@@ -60,7 +61,10 @@
       <!-- ------------------------------------------------------ new task -->
       <section class="screen" id="screen-task">
         <div class="greeting-wrap" id="greeting-wrap">
-          <h1 class="greeting">Where should we begin?</h1>
+          <h1 class="greeting">
+            <svg class="greeting-icon icon" viewBox="0 0 24 24"><path d="M12 3l7 3v5.5c0 4.2-2.9 8.1-7 9.5-4.1-1.4-7-5.3-7-9.5V6l7-3z"/></svg>
+            <span id="greeting-text">Where should we begin?</span>
+          </h1>
         </div>
 
         <div class="composer">
@@ -75,9 +79,8 @@
           </div>
 
           <div class="composer-bar">
-            <button class="ghost-btn" id="attach-btn">
-              <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M14 4l-7.5 7.5a3 3 0 004.2 4.2L18 8.5"/></svg>
-              <span>Attach</span>
+            <button class="composer-plus-btn" id="attach-btn" title="Attach a file">
+              <svg class="icon" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
             </button>
             <input type="file" id="file-input" hidden>
             <div class="composer-spacer"></div>
@@ -85,6 +88,29 @@
               <svg class="icon" viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></svg>
             </button>
           </div>
+        </div>
+
+        <div class="suggestion-chips" id="suggestion-chips">
+          <button class="chip" data-prefill="Search the knowledge vault for ">
+            <svg class="icon icon-sm" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+            <span>Search SOPs</span>
+          </button>
+          <button class="chip" data-prefill="Calculate ">
+            <svg class="icon icon-sm" viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 7h8M8 11h.01M12 11h.01M16 11h.01M8 15h.01M12 15h.01M16 15h.01"/></svg>
+            <span>Calculate</span>
+          </button>
+          <button class="chip" data-prefill="Draft a formal report on ">
+            <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8l-5-5z"/><path d="M14 3v5h5"/></svg>
+            <span>Draft Report</span>
+          </button>
+          <button class="chip" data-prefill="Write and run a Python script to ">
+            <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M8 6L3 12l5 6M16 6l5 6-5 6"/></svg>
+            <span>Run Code</span>
+          </button>
+          <button class="chip" data-prefill="Analyze this scanned document: ">
+            <svg class="icon icon-sm" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="M21 15l-5-5L5 21"/></svg>
+            <span>Analyze Scan</span>
+          </button>
         </div>
 
         <div class="run" id="run" hidden>
