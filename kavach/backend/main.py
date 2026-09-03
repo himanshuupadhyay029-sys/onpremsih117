@@ -41,11 +41,11 @@ from backend.shield.monitor import (
 
 app = FastAPI(title="KAVACH", description="Phase 10: Frontend UI + Sovereignty Proof + Agent Brain")
 
-FRONTEND_DIR = config.PROJECT_ROOT / "frontend"
+FRONTEND_DIR = config.PROJECT_ROOT / "frontend-react" / "dist"
 UPLOADS_DIR = config.PROJECT_ROOT / "knowledge" / "uploads"
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
-app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
+app.mount("/assets", StaticFiles(directory=str(FRONTEND_DIR / "assets")), name="assets")
 
 
 @app.on_event("startup")

@@ -231,6 +231,8 @@ def plan_node(state: AgentState) -> dict:
         actor=reasoning_model,
         summary=f"{'Re-planned' if is_revision else 'Generated plan'} with {len(steps)} steps",
         metadata={
+            "task": state.get("original_task"),
+            "model": reasoning_model,
             "is_revision": is_revision,
             "revise_count": revise_count,
             "steps": steps,
@@ -503,8 +505,10 @@ def execute_node(state: AgentState) -> dict:
         actor=actor,
         summary=f"Step {step['step_num']} ({tool}): {'ERROR' if is_error else 'OK'} - {output[:100]}",
         metadata={
+            "task": state.get("original_task"),
             "step_num": step["step_num"],
             "tool": tool,
+            "model": actor,
             "input": step_input,
             "output_preview": output[:300],
             "error": is_error,
@@ -764,6 +768,7 @@ def run_agent(task: str, attachment_type: Optional[str] = None, task_id: Optiona
         actor="router",
         summary=f"Routed to task_type='{routing_decision.task_type}', model_role='{model_role}' ({model_tag})",
         metadata={
+            "task": task,
             "task_type": routing_decision.task_type,
             "model_role": model_role,
             "model_tag": model_tag,
