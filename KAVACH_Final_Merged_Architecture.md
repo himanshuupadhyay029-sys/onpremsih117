@@ -1,4 +1,4 @@
-# KAVACH — Final Merged Architecture (built on Alok's working codebase)
+ṣ# KAVACH — Final Merged Architecture (built on Alok's working codebase)
 ### SIH26117 · supersedes the earlier greenfield architecture
 
 **What changed:** the base is no longer a blank repo. **Alok's project is a running skeleton and becomes our foundation.** We keep what already works, and bolt the finale-critical layers on top. This document is the merge map: what to KEEP, what to MODIFY, what to ADD.

@@ -1,6 +1,19 @@
 import React from 'react';
 
-export default function Sidebar({ activeScreen, onSelectScreen, isThinking, collapsed, onToggle }) {
+export default function Sidebar({
+  activeScreen,
+  onSelectScreen,
+  isThinking,
+  collapsed,
+  onToggle,
+  user,
+  onLogout,
+  onShowAuth,
+  chats,
+  activeChatId,
+  onNewChat,
+  onSelectChat,
+}) {
   return (
     <aside className="sidebar" id="sidebar">
       <div className="sidebar-head">
@@ -23,15 +36,30 @@ export default function Sidebar({ activeScreen, onSelectScreen, isThinking, coll
         </button>
       </div>
 
+      {/* + New Chat button */}
+      {user && (
+        <button
+          className="new-chat-btn"
+          onClick={onNewChat}
+          id="new-chat-btn"
+          title="Start a new chat"
+        >
+          <svg className="icon" viewBox="0 0 24 24">
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+          <span>New Chat</span>
+        </button>
+      )}
+
       <nav className="nav">
         <button
           className={`nav-item ${activeScreen === 'task' ? 'is-active' : ''}`}
           onClick={() => onSelectScreen('task')}
         >
           <svg className="icon" viewBox="0 0 24 24">
-            <path d="M12 5v14M5 12h14" />
+            <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
           </svg>
-          <span>New Task</span>
+          <span>Chat</span>
         </button>
 
         <button
@@ -57,7 +85,66 @@ export default function Sidebar({ activeScreen, onSelectScreen, isThinking, coll
         </button>
       </nav>
 
-      <div className="sidebar-foot">Runs entirely on this machine.</div>
+      {/* Chat History List (visible when on 'task' screen and user is logged in) */}
+      {user && activeScreen === 'task' && chats && chats.length > 0 && (
+        <div className="chat-history" id="chat-history">
+          <div className="chat-history-label">Recent Chats</div>
+          <div className="chat-history-list">
+            {chats.map((chat) => (
+              <button
+                key={chat.id}
+                className={`chat-history-item ${chat.id === activeChatId ? 'is-active' : ''}`}
+                onClick={() => onSelectChat(chat.id)}
+                title={chat.title}
+              >
+                <svg className="icon icon-sm" viewBox="0 0 24 24">
+                  <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
+                </svg>
+                <span className="chat-history-title">{chat.title}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* User profile block or sign-in prompt */}
+      <div className="sidebar-foot">
+        {user ? (
+          <div className="user-profile" id="user-profile">
+            <div className="user-avatar" id="user-avatar">
+              {(user.name || user.email || '?').charAt(0).toUpperCase()}
+            </div>
+            <div className="user-info">
+              <div className="user-name">{user.name}</div>
+              <div className="user-email">{user.email}</div>
+            </div>
+            <button
+              className="logout-btn"
+              onClick={onLogout}
+              title="Sign out"
+              id="logout-btn"
+            >
+              <svg className="icon icon-sm" viewBox="0 0 24 24">
+                <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" />
+                <polyline points="16 17 21 12 16 7" />
+                <line x1="21" y1="12" x2="9" y2="12" />
+              </svg>
+            </button>
+          </div>
+        ) : (
+          <button
+            className="sign-in-prompt"
+            onClick={onShowAuth}
+            id="sign-in-prompt"
+          >
+            <svg className="icon icon-sm" viewBox="0 0 24 24">
+              <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" />
+              <circle cx="12" cy="7" r="4" />
+            </svg>
+            <span>Sign in to save chats</span>
+          </button>
+        )}
+      </div>
     </aside>
   );
 }

@@ -36,10 +36,12 @@ logger = logging.getLogger("kavach.agent")
 if not logger.handlers:
     logging.basicConfig(level=logging.INFO)
 
-MAX_TOTAL_STEPS = 10
-MAX_REVISIONS = 3
+MAX_TOTAL_STEPS = 5
+MAX_REVISIONS = 2
 ERROR_TRIGGER = "simulate_error"
 CODE_TIMEOUT_SECONDS = 15
+MAX_HISTORY_TURNS = 8
+MAX_HISTORY_CHARS_PER_MSG = 400
 
 VALID_TOOLS = {"llm", "search", "calc", "vision", "document", "code", "ocr"}
 
@@ -62,11 +64,30 @@ Tool Selection Rules:
 - "vision": for analyzing engineering drawings, diagrams, or gauges.
 - "llm": ONLY for general reasoning or direct questions where no specific tool is needed.
 
-Task: {task}
+{history_section}Task: {task}
 Task type: {task_type}{failure_context}
 
 Respond with ONLY a raw JSON array of step objects. Max 3 steps (unless revising). No prose, no markdown fences, no explanation.
 """
+
+
+def _format_history(history: Optional[List[dict]]) -> str:
+    """Formats the last N conversation turns into a bounded context string for 3B LLM prompts."""
+    if not history:
+        return ""
+    recent = history[-MAX_HISTORY_TURNS:]
+    lines = []
+    for msg in recent:
+        role = (msg.get("role") or "user").capitalize()
+        content = (msg.get("content") or "").strip()
+        if len(content) > MAX_HISTORY_CHARS_PER_MSG:
+            content = content[:MAX_HISTORY_CHARS_PER_MSG - 3] + "..."
+        if content:
+            lines.append(f"{role}: {content}")
+    if not lines:
+        return ""
+    return "Prior Conversation Context:\n" + "\n".join(lines) + "\n"
+
 
 
 # ---------------------------------------------------------------------------
@@ -209,11 +230,17 @@ def plan_node(state: AgentState) -> dict:
             f"{guidance}"
         )
 
+    history_section = ""
+    if state.get("history_context"):
+        history_section = f"{state['history_context']}\n"
+
     prompt = PLAN_PROMPT_TEMPLATE.format(
+        history_section=history_section,
         task=state["original_task"],
         task_type=state["routing_decision"]["task_type"],
         failure_context=failure_context,
     )
+
 
     thought = {
         "role": "thought",
@@ -286,8 +313,11 @@ def execute_node(state: AgentState) -> dict:
         role = state["routing_decision"]["model_role"]
         model = registry.get_model(role)
         actor = model
+        llm_prompt = step_input
+        if state.get("history_context"):
+            llm_prompt = f"{state['history_context']}\nUser query: {step_input}"
         try:
-            output = ollama.generate(model, step_input)
+            output = ollama.generate(model, llm_prompt)
             is_error = False
         except Exception as exc:  # noqa: BLE001 - becomes an observed [error]
             output = f"[error] llm call failed: {exc}"
@@ -715,8 +745,12 @@ def finalize_node(state: AgentState) -> dict:
     outputs_summary = "\n".join(
         f"Step {o['step_num']} ({o['tool']}): {o['output']}" for o in state["step_outputs"]
     )
+    history_section = ""
+    if state.get("history_context"):
+        history_section = f"{state['history_context']}\n"
+
     prompt = (
-        f"Task: {state['original_task']}\n\n"
+        f"{history_section}Current Task: {state['original_task']}\n\n"
         f"Steps executed and their results:\n{outputs_summary}\n\n"
         + ("Note: not all steps succeeded; acknowledge this and answer as best as possible.\n\n" if failed else "")
         + "Write a clear, concise final answer for the user based on the above."
@@ -793,9 +827,16 @@ def build_graph():
 _COMPILED_GRAPH = build_graph()
 
 
-def run_agent(task: str, attachment_type: Optional[str] = None, task_id: Optional[str] = None) -> dict:
+def run_agent(
+    task: str,
+    attachment_type: Optional[str] = None,
+    task_id: Optional[str] = None,
+    history: Optional[List[dict]] = None,
+) -> dict:
     if not task_id:
         task_id = str(uuid.uuid4())
+
+    history_ctx = _format_history(history)
 
     has_img_signal = bool(
         attachment_type in ("image", "photo", "picture", "file")
@@ -847,7 +888,9 @@ def run_agent(task: str, attachment_type: Optional[str] = None, task_id: Optiona
         ],
         "revise_count": 0,
         "final_answer": None,
+        "history_context": history_ctx,
     }
+
 
     final_state = _COMPILED_GRAPH.invoke(initial_state, config={"recursion_limit": 60})
 

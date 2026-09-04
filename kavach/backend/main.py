@@ -13,17 +13,25 @@ os.environ.pop("LANGSMITH_API_KEY", None)
 import asyncio
 import json
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
+import uuid
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
 from backend import config
 from backend.audit.logbook import log_event, read_events
+from backend.auth.routes import router as auth_router, get_optional_user
 from backend.brain.agent import run_agent
-from backend.engine import ollama, registry
+from backend.chat.routes import router as chat_router
+from backend.db.models import Chat, Message, User
+from backend.db.session import get_db
+from sqlalchemy import func
+from sqlalchemy.orm import Session
 from backend.guard.approve import get_approval, resolve_approval
 from backend.tools.writer import render_docx
 from backend.vault.ingest import METADATA_PATH, SUPPORTED_EXTENSIONS, ingest_document
@@ -39,7 +47,26 @@ from backend.shield.monitor import (
     stop_monitor,
 )
 
-app = FastAPI(title="KAVACH", description="Phase 10: Frontend UI + Sovereignty Proof + Agent Brain")
+app = FastAPI(title="KAVACH", description="Phase 10: Frontend UI + Sovereignty Proof + Agent Brain + Auth & Persistent Chat")
+
+# Explicit CORS configuration
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(auth_router)
+app.include_router(chat_router)
 
 VANILLA_FRONTEND_DIR = config.PROJECT_ROOT / "frontend"
 REACT_FRONTEND_DIR = config.PROJECT_ROOT / "frontend-react" / "dist"
@@ -66,6 +93,9 @@ class RunRequest(BaseModel):
     task: str
     attachment_type: Optional[str] = None
     task_id: Optional[str] = None
+    chat_id: Optional[str] = None
+    history: Optional[List[Dict[str, Any]]] = None
+
 
 
 @app.get("/")
@@ -88,8 +118,133 @@ def health():
 
 
 @app.post("/run")
-def run(req: RunRequest):
-    return run_agent(req.task, attachment_type=req.attachment_type, task_id=req.task_id)
+def run(
+    req: RunRequest,
+    current_user: Optional[User] = Depends(get_optional_user),
+    db: Session = Depends(get_db),
+):
+    chat = None
+    user_msg = None
+    chat_id = req.chat_id
+
+    if current_user:
+        # Check if chat exists and belongs to this user
+        if chat_id:
+            try:
+                c_uuid = uuid.UUID(chat_id)
+                chat = db.query(Chat).filter(Chat.id == c_uuid, Chat.user_id == current_user.id).first()
+            except Exception:
+                chat = None
+
+        # Auto-create if no chat or invalid chat_id provided (BEFORE running the agent)
+        if not chat:
+            # Generate clean title from prompt
+            clean_title = req.task.strip().split("\n")[0]
+            if len(clean_title) > 40:
+                clean_title = clean_title[:37] + "..."
+            chat = Chat(
+                user_id=current_user.id,
+                title=clean_title or "New Chat",
+                chat_type="general",
+            )
+            db.add(chat)
+            db.commit()
+            db.refresh(chat)
+
+        # Persist user message immediately before running agent
+        try:
+            user_msg = Message(
+                id=uuid.uuid4(),
+                chat_id=chat.id,
+                role="user",
+                content=req.task,
+                meta={"attachment_type": req.attachment_type, "task_id": req.task_id},
+            )
+            db.add(user_msg)
+            chat.updated_at = func.now()
+            db.commit()
+        except Exception as exc:
+            print(f"[ERROR] Failed to persist user message: {exc}", flush=True)
+
+    # Fetch prior history for multi-turn context (excluding the user message we just saved)
+    history = []
+    if chat:
+        try:
+            if user_msg:
+                db_msgs = (
+                    db.query(Message)
+                    .filter(Message.chat_id == chat.id, Message.id != user_msg.id)
+                    .order_by(Message.created_at.asc())
+                    .all()
+                )
+            else:
+                db_msgs = (
+                    db.query(Message)
+                    .filter(Message.chat_id == chat.id)
+                    .order_by(Message.created_at.asc())
+                    .all()
+                )
+            history = [{"role": m.role, "content": m.content} for m in db_msgs]
+        except Exception as exc:
+            print(f"[WARN] Failed to load history: {exc}", flush=True)
+
+    if not history and req.history:
+        history = req.history
+
+
+    agent_res = run_agent(
+        req.task,
+        attachment_type=req.attachment_type,
+        task_id=req.task_id,
+        history=history,
+    )
+
+    if chat:
+        try:
+            asst_msg = Message(
+                id=uuid.uuid4(),
+                chat_id=chat.id,
+                role="assistant",
+                content=agent_res.get("result", "") or "",
+                meta={
+                    "task_id": agent_res.get("task_id"),
+                    "status": agent_res.get("status"),
+                    "trace": agent_res.get("trace", []),
+                    "steps": agent_res.get("steps", agent_res.get("plan", [])),
+                    "step_outputs": agent_res.get("step_outputs", []),
+                    "sources": agent_res.get("sources", []),
+                    "generated_files": agent_res.get("generated_files", []),
+                    "code_runs": agent_res.get("code_runs", []),
+                    "approval": agent_res.get("approval"),
+                    "draft_content": agent_res.get("draft_content"),
+                    "model_used": agent_res.get("model_used"),
+                    "routing_decision": agent_res.get("routing_decision"),
+                },
+            )
+            db.add(asst_msg)
+
+            # Auto-titling if chat title was still generic "New Chat"
+            if chat.title == "New Chat":
+                clean_title = req.task.strip().split("\n")[0]
+                if len(clean_title) > 40:
+                    clean_title = clean_title[:37] + "..."
+                chat.title = clean_title or "New Chat"
+
+            chat.updated_at = func.now()
+            db.commit()
+        except Exception as exc:
+            print(f"[ERROR] Failed to persist assistant message: {exc}", flush=True)
+
+    # Attach chat_id and chat_title to return payload
+    if chat:
+        agent_res["chat_id"] = str(chat.id)
+        agent_res["chat_title"] = chat.title
+    else:
+        agent_res["chat_id"] = None
+        agent_res["chat_title"] = None
+
+    return agent_res
+
 
 
 @app.get("/models")

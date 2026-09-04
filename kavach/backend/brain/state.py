@@ -52,3 +52,5 @@ class AgentState(TypedDict):
     status: str  # planning | executing | revising | complete | failed
     revise_count: int
     final_answer: Optional[str]
+    history_context: Optional[str]
+

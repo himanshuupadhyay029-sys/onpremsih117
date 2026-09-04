@@ -42,15 +42,19 @@ LANGUAGE_CONFIGS = {
         "display_name": "Python",
     },
     "javascript": {
-        "image": "node:20-alpine",
+        "image": "node:20-slim",
         "filename": "solution.js",
         "command": ["node", "/code/solution.js"],
         "display_name": "JavaScript",
     },
     "c": {
-        "image": "gcc:latest",
+        "image": "gcc:13-slim",
         "filename": "solution.c",
-        "command": ["sh", "-c", "gcc -O2 /code/solution.c -o /tmp/app && /tmp/app"],
+        "command": [
+            "sh",
+            "-c",
+            "gcc -O2 /code/solution.c -o /tmp/app -lm 2> /tmp/compile_err || { echo '__COMPILE_FAILED__'; cat /tmp/compile_err; exit 1; }; /tmp/app",
+        ],
         "display_name": "C",
     },
 }
@@ -199,6 +203,8 @@ def run_code(
     Cleans up always. Fails closed if Docker is unavailable.
     """
     lang = (language or "python").lower().strip()
+    if lang == "js":
+        lang = "javascript"
     if lang not in LANGUAGE_CONFIGS:
         lang = "python"
 
@@ -339,13 +345,30 @@ def run_code(
 
         duration_seconds = round(time.time() - start_time, 3)
 
-        if not timed_out and exit_code != 0:
+        # Stage classification for multi-language pipelines (especially C compile vs runtime)
+        stage = "runtime"
+        compile_output = ""
+        runtime_output = stdout or ""
+
+        if lang == "c":
+            combined_out = (stdout or "") + "\n" + (stderr or "")
+            if "__COMPILE_FAILED__" in combined_out:
+                stage = "compile"
+                compile_output = combined_out.replace("__COMPILE_FAILED__", "").strip()
+                runtime_output = ""
+                stderr = f"[compile error] C compilation failed:\n{compile_output}"
+                exit_code = exit_code if exit_code != 0 else 1
+            else:
+                compile_output = "Compilation succeeded (gcc -O2 -lm)"
+                runtime_output = stdout or ""
+
+        if not timed_out and exit_code != 0 and stage == "runtime":
             stderr = _annotate_stderr(stderr, image_name)
 
         success = (exit_code == 0) and not timed_out
         status_word = "SUCCEEDED" if success else "FAILED"
         _log_terminal(
-            f"Container execution {status_word}: exit_code={exit_code}, duration={duration_seconds}s, "
+            f"Container execution {status_word} [stage={stage}]: exit_code={exit_code}, duration={duration_seconds}s, "
             f"stdout={len(stdout)} chars, stderr={len(stderr)} chars"
         )
 
@@ -356,6 +379,9 @@ def run_code(
             "exit_code": exit_code,
             "timed_out": timed_out,
             "language": lang,
+            "stage": stage,
+            "compile_output": compile_output,
+            "runtime_output": runtime_output,
             "duration_seconds": duration_seconds,
         }
 
@@ -363,9 +389,10 @@ def run_code(
             task_id=task_id,
             event_type="sandbox",
             actor="sandbox",
-            summary=f"Sandbox run ({display_name}) {status_word} (exit_code={exit_code}, {duration_seconds}s)",
+            summary=f"Sandbox run ({display_name}) {status_word} [stage={stage}] (exit_code={exit_code}, {duration_seconds}s)",
             metadata={
                 "language": lang,
+                "stage": stage,
                 "image": image_name,
                 "exit_code": exit_code,
                 "duration_seconds": duration_seconds,

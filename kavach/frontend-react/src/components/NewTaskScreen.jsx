@@ -1,21 +1,5 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
-
-const MODEL_LABELS = {
-  reasoning: 'Reasoning model',
-  code: 'Code model',
-  vision: 'Vision model',
-  embedding: 'Embedding model',
-};
-
-const TOOL_LABELS = {
-  llm: 'Reasoning',
-  search: 'Knowledge Vault search',
-  calc: 'Calculation',
-  code: 'Code sandbox',
-  ocr: 'Document OCR',
-  vision: 'Image analysis',
-  document: 'Document writer',
-};
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import MessageTurn from './MessageTurn';
 
 const GREETINGS = [
   "Where should we begin?",
@@ -78,35 +62,76 @@ const SUGGESTION_CHIPS = [
   },
 ];
 
-export default function NewTaskScreen({ setIsThinking }) {
+export default function NewTaskScreen({
+  setIsThinking,
+  user,
+  activeChatId,
+  setActiveChatId,
+  onShowAuth,
+  onChatsUpdated,
+}) {
   const [taskInput, setTaskInput] = useState('');
   const [attachedFile, setAttachedFile] = useState(null);
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
-  const [greeting] = useState(() => {
-    return GREETINGS[Math.floor(Math.random() * GREETINGS.length)];
-  });
+  const [greeting] = useState(() => GREETINGS[Math.floor(Math.random() * GREETINGS.length)]);
 
-  // Execution state
-  const [hasRun, setHasRun] = useState(false);
+  // Unified conversation turns
+  const [messages, setMessages] = useState([]);
   const [running, setRunning] = useState(false);
-  const [modelMeta, setModelMeta] = useState('');
-  const [statusText, setStatusText] = useState('Planning steps…');
-  const [elapsedSeconds, setElapsedSeconds] = useState(0);
-  const [steps, setSteps] = useState([]);
-  const [resultData, setResultData] = useState(null);
-  const [errorMsg, setErrorMsg] = useState('');
-
-  // Approval state
   const [approvalOutcome, setApprovalOutcome] = useState({});
-  const [editingApproval, setEditingApproval] = useState({});
-  const [editTitle, setEditTitle] = useState('');
-  const [editSections, setEditSections] = useState('');
 
   const textareaRef = useRef(null);
   const fileInputRef = useRef(null);
+  const chatBottomRef = useRef(null);
   const pollTimerRef = useRef(null);
   const tickerRef = useRef(null);
   const startTimeRef = useRef(0);
+
+  const lastLoadedChatIdRef = useRef(undefined);
+
+  // Load chat messages when activeChatId changes
+  useEffect(() => {
+    // If activeChatId matches what is already loaded/in-memory, do nothing
+    if (activeChatId === lastLoadedChatIdRef.current) {
+      return;
+    }
+
+    lastLoadedChatIdRef.current = activeChatId;
+
+    // Reset turns and input state on session change
+    setMessages([]);
+    setTaskInput('');
+    setAttachedFile(null);
+    setApprovalOutcome({});
+
+    if (!activeChatId) {
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/chats/${encodeURIComponent(activeChatId)}/messages`, {
+          credentials: 'include',
+        });
+        if (res.ok && !cancelled) {
+          const dbMsgs = await res.json();
+          setMessages(dbMsgs);
+        }
+      } catch (err) {
+        console.error('Failed to load chat messages:', err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeChatId]);
+
+  // Auto-scroll to bottom of thread
+  useEffect(() => {
+    if (chatBottomRef.current) {
+      chatBottomRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [messages, running]);
 
   const handleChipClick = (prefill) => {
     setTaskInput(prefill);
@@ -115,29 +140,21 @@ export default function NewTaskScreen({ setIsThinking }) {
       setTimeout(() => {
         if (textareaRef.current) {
           textareaRef.current.style.height = 'auto';
-          textareaRef.current.style.height = `${Math.min(
-            textareaRef.current.scrollHeight,
-            220
-          )}px`;
+          textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 220)}px`;
           textareaRef.current.setSelectionRange(prefill.length, prefill.length);
         }
       }, 0);
     }
   };
 
-  // Adjust textarea height
   const handleInputChange = (e) => {
     setTaskInput(e.target.value);
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
-      textareaRef.current.style.height = `${Math.min(
-        textareaRef.current.scrollHeight,
-        220
-      )}px`;
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 220)}px`;
     }
   };
 
-  // Handle file attachment
   const handleFileChange = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -164,8 +181,8 @@ export default function NewTaskScreen({ setIsThinking }) {
     }
   };
 
-  // Live audit event parser for progress
-  const applyAuditEvents = (events) => {
+  // Live audit event parser for in-flight assistant turn
+  const applyAuditEvents = useCallback((events, asstTurnId) => {
     const planIndex = events.map((e) => e.event_type).lastIndexOf('plan');
     if (planIndex === -1) return;
 
@@ -181,81 +198,115 @@ export default function NewTaskScreen({ setIsThinking }) {
       if (step) step.status = event.metadata?.error ? 'failed' : 'done';
     }
 
-    const finished = after.some(
-      (e) => e.event_type === 'complete' || e.event_type === 'error'
-    );
+    const finished = after.some((e) => e.event_type === 'complete' || e.event_type === 'error');
     const activeIndex = rawSteps.findIndex((s) => s.status === 'pending');
 
-    setSteps(rawSteps);
-
-    const route = events.find((e) => e.event_type === 'route');
-    if (route) {
-      const role = route.metadata?.model_role;
-      setModelMeta(
-        `${MODEL_LABELS[role] || role || 'Model'} · ${
-          route.metadata?.model_tag || ''
-        }`
-      );
-    }
-
+    let statusText = 'Planning steps…';
     const revisions = after.filter(
       (e) => e.event_type === 'observe' && e.metadata?.decision === 'revise'
     ).length;
 
     if (revisions > 0) {
-      setStatusText(`Self-correcting after an error (revision ${revisions})…`);
+      statusText = `Self-correcting after an error (revision ${revisions})…`;
     } else if (activeIndex !== -1 && activeIndex < rawSteps.length) {
       const cur = rawSteps[activeIndex];
-      const toolLabel = TOOL_LABELS[cur.tool] || cur.tool;
-      setStatusText(
-        `Step ${activeIndex + 1}/${rawSteps.length}: Running ${toolLabel}…`
-      );
+      statusText = `Step ${activeIndex + 1}/${rawSteps.length}: Running ${cur.tool}…`;
     } else if (finished) {
-      setStatusText('Finalizing output…');
+      statusText = 'Finalizing output…';
     } else if (rawSteps.some((s) => s.status !== 'pending')) {
-      setStatusText('Working through steps…');
-    } else {
-      setStatusText('Planning steps…');
+      statusText = 'Working through steps…';
     }
-  };
 
-  // Run task execution
-  const runTask = async () => {
-    const task = taskInput.trim();
+    let modelMeta = '';
+    const route = events.find((e) => e.event_type === 'route');
+    if (route) {
+      const role = route.metadata?.model_role;
+      modelMeta = `${role || 'Model'} · ${route.metadata?.model_tag || ''}`;
+    }
+
+    setMessages((prev) =>
+      prev.map((msg) => {
+        if (msg.id === asstTurnId) {
+          return {
+            ...msg,
+            steps: rawSteps,
+            statusText,
+            modelMeta: modelMeta || msg.modelMeta,
+          };
+        }
+        return msg;
+      })
+    );
+  }, []);
+
+  // Run Task Execution with Optimistic UI Updates
+  const runTask = async (promptOverride = null) => {
+    const task = (promptOverride || taskInput).trim();
     if (!task || running) return;
 
     const taskId = crypto.randomUUID();
-    const fullTask = attachedFile?.path
-      ? `${task}\n\nAttached file: ${attachedFile.path}`
-      : task;
+    const fullTask = attachedFile?.path ? `${task}\n\nAttached file: ${attachedFile.path}` : task;
 
-    setHasRun(true);
-    setRunning(true);
-    setIsThinking(true);
-    setResultData(null);
-    setErrorMsg('');
-    setSteps([]);
-    setModelMeta('');
-    setStatusText('Planning steps…');
-    setElapsedSeconds(0);
-    startTimeRef.current = Date.now();
+    const tempUserId = `temp-user-${Date.now()}`;
+    const tempAsstId = `temp-asst-${Date.now()}`;
 
+    const userTurn = {
+      id: tempUserId,
+      role: 'user',
+      content: task,
+      created_at: new Date().toISOString(),
+      meta: { attachment_type: attachedFile ? 'file' : null, task_id: taskId },
+    };
+
+    const asstTurn = {
+      id: tempAsstId,
+      role: 'assistant',
+      is_streaming: true,
+      task_id: taskId,
+      statusText: 'Planning steps…',
+      steps: [],
+      content: '',
+      retryPrompt: fullTask,
+      created_at: new Date().toISOString(),
+    };
+
+    // Extract prior conversation history to send to backend
+    const priorHistory = messages
+      .filter((m) => !m.is_streaming && !m.is_error)
+      .map((m) => ({
+        role: m.role,
+        content: m.content || m.result || '',
+      }));
+
+    // Optimistically append user message and streaming assistant turn immediately
+    setMessages((prev) => [...prev, userTurn, asstTurn]);
     setTaskInput('');
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
 
+    setRunning(true);
+    setIsThinking(true);
+    startTimeRef.current = Date.now();
+
     // Ticker for elapsed seconds
     tickerRef.current = setInterval(() => {
-      setElapsedSeconds(Math.floor((Date.now() - startTimeRef.current) / 1000));
+      const elapsed = Math.floor((Date.now() - startTimeRef.current) / 1000);
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === tempAsstId ? { ...m, statusText: `${m.statusText?.split(' (')[0] || 'Working…'} (${elapsed}s)` } : m
+        )
+      );
     }, 1000);
 
     // Audit poll for live progress
     pollTimerRef.current = setInterval(async () => {
       try {
         const res = await fetch(`/audit?task_id=${encodeURIComponent(taskId)}`);
-        const data = await res.json();
-        applyAuditEvents(data.events || []);
+        if (res.ok) {
+          const data = await res.json();
+          applyAuditEvents(data.events || [], tempAsstId);
+        }
       } catch {
-        // ignore poll errors
+        // ignore poll error
       }
     }, 1000);
 
@@ -263,31 +314,99 @@ export default function NewTaskScreen({ setIsThinking }) {
       const response = await fetch('/run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ task: fullTask, task_id: taskId }),
+        credentials: 'include',
+        body: JSON.stringify({
+          task: fullTask,
+          task_id: taskId,
+          chat_id: activeChatId || undefined,
+          history: priorHistory,
+        }),
       });
-      if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+
+      if (!response.ok) {
+        throw new Error(`${response.status} ${response.statusText}`);
+      }
+
       const data = await response.json();
 
       clearInterval(pollTimerRef.current);
       clearInterval(tickerRef.current);
 
-      const auditRes = await fetch(
-        `/audit?task_id=${encodeURIComponent(taskId)}`
-      );
-      const auditData = await auditRes.json();
-      applyAuditEvents(auditData.events || []);
-
-      setResultData(data);
-      if (data.draft_content) {
-        setEditTitle(data.draft_content.title || '');
-        setEditSections(
-          JSON.stringify(data.draft_content.sections || [], null, 2)
-        );
+      // If backend auto-created a new chat, update lastLoadedChatIdRef first to avoid clearing!
+      if (data.chat_id && data.chat_id !== activeChatId) {
+        lastLoadedChatIdRef.current = data.chat_id;
+        setActiveChatId(data.chat_id);
       }
+      if (onChatsUpdated) {
+        onChatsUpdated();
+      }
+
+      // Final audit sync
+      try {
+        const auditRes = await fetch(`/audit?task_id=${encodeURIComponent(taskId)}`);
+        if (auditRes.ok) {
+          const auditData = await auditRes.json();
+          applyAuditEvents(auditData.events || [], tempAsstId);
+        }
+      } catch {
+        // ignore
+      }
+
+      // Finalize assistant message with full rich payload
+
+      setMessages((prev) =>
+        prev.map((msg) => {
+          if (msg.id === tempAsstId) {
+            return {
+              ...msg,
+              is_streaming: false,
+              content: data.result || '',
+              result: data.result || '',
+              status: data.status,
+              steps: data.steps || data.plan || msg.steps || [],
+              step_outputs: data.step_outputs || [],
+              sources: data.sources || [],
+              generated_files: data.generated_files || [],
+              code_runs: data.code_runs || [],
+              approval: data.approval || null,
+              draft_content: data.draft_content || null,
+              modelMeta: data.model_used ? `Model · ${data.model_used}` : msg.modelMeta,
+              meta: {
+                task_id: taskId,
+                status: data.status,
+                steps: data.steps || data.plan || [],
+                step_outputs: data.step_outputs || [],
+                sources: data.sources || [],
+                generated_files: data.generated_files || [],
+                code_runs: data.code_runs || [],
+                approval: data.approval || null,
+                draft_content: data.draft_content || null,
+                model_used: data.model_used,
+                routing_decision: data.routing_decision,
+              },
+            };
+          }
+          return msg;
+        })
+      );
     } catch (err) {
       clearInterval(pollTimerRef.current);
       clearInterval(tickerRef.current);
-      setErrorMsg(`The task could not complete: ${err.message}`);
+
+      setMessages((prev) =>
+        prev.map((msg) => {
+          if (msg.id === tempAsstId) {
+            return {
+              ...msg,
+              is_streaming: false,
+              is_error: true,
+              errorMsg: `Task execution failed: ${err.message}`,
+              retryPrompt: fullTask,
+            };
+          }
+          return msg;
+        })
+      );
     } finally {
       clearInterval(pollTimerRef.current);
       clearInterval(tickerRef.current);
@@ -304,7 +423,7 @@ export default function NewTaskScreen({ setIsThinking }) {
     }
   };
 
-  // Handle human approval actions
+  // Human approval handlers
   const handleApprovalAction = async (taskId, decision) => {
     setApprovalOutcome((prev) => ({
       ...prev,
@@ -315,6 +434,7 @@ export default function NewTaskScreen({ setIsThinking }) {
       const res = await fetch(`/approval/${encodeURIComponent(taskId)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ decision }),
       });
       const data = await res.json();
@@ -347,7 +467,7 @@ export default function NewTaskScreen({ setIsThinking }) {
     }
   };
 
-  const handleApprovalEditSubmit = async (taskId) => {
+  const handleApprovalEditSubmit = async (taskId, editTitle, editSections) => {
     let parsedSections = [];
     try {
       parsedSections = JSON.parse(editSections);
@@ -358,7 +478,6 @@ export default function NewTaskScreen({ setIsThinking }) {
       parsedSections = [{ heading: 'Summary', body: editSections }];
     }
 
-    setEditingApproval((prev) => ({ ...prev, [taskId]: false }));
     setApprovalOutcome((prev) => ({
       ...prev,
       [taskId]: { loading: true, message: 'Rendering edited document…' },
@@ -368,6 +487,7 @@ export default function NewTaskScreen({ setIsThinking }) {
       const res = await fetch(`/approval/${encodeURIComponent(taskId)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({
           decision: 'edit',
           edited_content: { title: editTitle, sections: parsedSections },
@@ -391,530 +511,126 @@ export default function NewTaskScreen({ setIsThinking }) {
     }
   };
 
-  // Copy code handler
-  const handleCopyCode = (code, btn) => {
-    navigator.clipboard.writeText(code).then(() => {
-      btn.textContent = 'Copied!';
-      setTimeout(() => {
-        btn.textContent = 'Copy';
-      }, 2000);
-    });
-  };
-
-  // Extract all unique sources from resultData (root sources, step_outputs, and text annotations)
-  const sourceNames = useMemo(() => {
-    if (!resultData) return [];
-    const collected = [];
-
-    // 1. Root sources
-    for (const s of resultData.sources || []) {
-      const name = typeof s === 'string' ? s : s?.filename || s?.source_filename || s?.name;
-      if (name) collected.push(name);
-    }
-
-    // 2. Step outputs sources
-    for (const step of resultData.step_outputs || []) {
-      for (const s of step.sources || []) {
-        const name = typeof s === 'string' ? s : s?.filename || s?.source_filename || s?.name;
-        if (name) collected.push(name);
-      }
-    }
-
-    // 3. Generated files sources
-    for (const f of resultData.generated_files || []) {
-      for (const s of f.sources || []) {
-        const name = typeof s === 'string' ? s : s?.filename || s?.source_filename || s?.name;
-        if (name) collected.push(name);
-      }
-    }
-
-    // 4. Fallback: Parse [Sources: ...] or [Source: ...] if present in text
-    const textToScan = [
-      resultData.result,
-      ...(resultData.step_outputs || []).map((s) => s.output),
-    ]
-      .filter(Boolean)
-      .join('\n');
-    const match = textToScan.match(/\[Sources?:\s*([^\]]+)\]/i);
-    if (match && match[1]) {
-      const parsed = match[1]
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean);
-      collected.push(...parsed);
-    }
-
-    return [...new Set(collected.filter(Boolean))];
-  }, [resultData]);
-
-  // Clean answer text without raw trailing [Sources: ...] tag
-  const cleanAnswer = useMemo(() => {
-    if (!resultData?.result) return '';
-    return resultData.result
-      .replace(/\n*\[Sources?:\s*[^\]]+\]\s*$/i, '')
-      .trim();
-  }, [resultData]);
+  const hasMessages = messages.length > 0;
 
   return (
-    <section className={`screen screen-task-container ${hasRun ? 'has-run' : ''}`} id="screen-task">
-      <div className={`greeting-wrap ${hasRun ? 'is-compact' : ''}`} id="greeting-wrap">
-        <h1 className="greeting">
-          <svg className="greeting-icon icon" viewBox="0 0 24 24">
-            <path d="M12 3l7 3v5.5c0 4.2-2.9 8.1-7 9.5-4.1-1.4-7-5.3-7-9.5V6l7-3z" />
-          </svg>
-          <span id="greeting-text">{greeting}</span>
-        </h1>
-      </div>
+    <section className="screen-task-container" id="screen-task">
+      {/* Scrollable Chat Area */}
+      <div className="chat-scroll-area" id="chat-scroll-area">
+        {/* Landing State: Greeting & Suggestion Chips (when thread is empty) */}
+        {!hasMessages && (
+          <div className="landing-hero" id="landing-hero">
+            <div className="greeting-wrap" id="greeting-wrap">
+              <h1 className="greeting">
+                <svg className="greeting-icon icon" viewBox="0 0 24 24">
+                  <path d="M12 3l7 3v5.5c0 4.2-2.9 8.1-7 9.5-4.1-1.4-7-5.3-7-9.5V6l7-3z" />
+                </svg>
+                <span id="greeting-text">{greeting}</span>
+              </h1>
+            </div>
 
-      <div className="composer">
-        <textarea
-          ref={textareaRef}
-          id="task-input"
-          rows={1}
-          placeholder="Ask about an SOP, run a calculation, or draft a report…"
-          value={taskInput}
-          onChange={handleInputChange}
-          onKeyDown={handleKeyDown}
-          disabled={running}
-        />
-
-        {attachedFile && (
-          <div className="attachment" id="attachment">
-            <svg className="icon icon-sm" viewBox="0 0 24 24">
-              <path d="M14 4l-7.5 7.5a3 3 0 004.2 4.2L18 8.5" />
-            </svg>
-            <span id="attachment-name">{attachedFile.name}</span>
-            <button
-              id="attachment-clear"
-              onClick={() => setAttachedFile(null)}
-              title="Remove attachment"
-            >
-              <svg className="icon icon-sm" viewBox="0 0 24 24">
-                <path d="M6 6l12 12M18 6L6 18" />
-              </svg>
-            </button>
+            <div className="suggestion-chips" id="suggestion-chips">
+              {SUGGESTION_CHIPS.map((chip) => (
+                <button
+                  key={chip.label}
+                  className="chip"
+                  onClick={() => handleChipClick(chip.prefill)}
+                >
+                  {chip.icon}
+                  <span>{chip.label}</span>
+                </button>
+              ))}
+            </div>
           </div>
         )}
 
-        <div className="composer-bar">
-          <button
-            className="composer-plus-btn"
-            id="attach-btn"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={running || uploadingAttachment}
-            title="Attach a file"
-          >
-            <svg className="icon" viewBox="0 0 24 24">
-              <path d="M12 5v14M5 12h14" />
-            </svg>
-          </button>
-          <input
-            type="file"
-            id="file-input"
-            ref={fileInputRef}
-            onChange={handleFileChange}
-            hidden
-          />
-
-          <div className="composer-spacer" />
-
-          <button
-            className="send-btn"
-            id="send-btn"
-            onClick={runTask}
-            disabled={!taskInput.trim() || running}
-            title="Run task"
-          >
-            <svg className="icon" viewBox="0 0 24 24">
-              <path d="M12 19V5M6 11l6-6 6 6" />
-            </svg>
-          </button>
-        </div>
+        {/* Unified Continuous Chat Thread */}
+        {hasMessages && (
+          <div className="chat-thread" id="chat-thread">
+            {messages.map((turn) => (
+              <MessageTurn
+                key={turn.id}
+                turn={{ ...turn, approvalOutcome }}
+                user={user}
+                onApprovalAction={handleApprovalAction}
+                onApprovalEditSubmit={handleApprovalEditSubmit}
+                onRetry={(prompt) => runTask(prompt)}
+              />
+            ))}
+            <div ref={chatBottomRef} style={{ height: '1px' }} />
+          </div>
+        )}
       </div>
 
-      {!hasRun && (
-        <div className="suggestion-chips" id="suggestion-chips">
-          {SUGGESTION_CHIPS.map((chip) => (
+      {/* Pinned Bottom Input Area (Never moves, pinned to bottom of viewport) */}
+      <div className="chat-composer-fixed" id="chat-composer-fixed">
+        <div className="composer">
+          <textarea
+            ref={textareaRef}
+            id="task-input"
+            rows={1}
+            placeholder="Ask about an SOP, run a calculation, or draft a report…"
+            value={taskInput}
+            onChange={handleInputChange}
+            onKeyDown={handleKeyDown}
+            disabled={running}
+          />
+
+          {attachedFile && (
+            <div className="attachment" id="attachment">
+              <svg className="icon icon-sm" viewBox="0 0 24 24">
+                <path d="M14 4l-7.5 7.5a3 3 0 004.2 4.2L18 8.5" />
+              </svg>
+              <span id="attachment-name">{attachedFile.name}</span>
+              <button
+                id="attachment-clear"
+                onClick={() => setAttachedFile(null)}
+                title="Remove attachment"
+              >
+                <svg className="icon icon-sm" viewBox="0 0 24 24">
+                  <path d="M6 6l12 12M18 6L6 18" />
+                </svg>
+              </button>
+            </div>
+          )}
+
+          <div className="composer-bar">
             <button
-              key={chip.label}
-              className="chip"
-              onClick={() => handleChipClick(chip.prefill)}
+              className="composer-plus-btn"
+              id="attach-btn"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={running || uploadingAttachment}
+              title="Attach a file"
             >
-              {chip.icon}
-              <span>{chip.label}</span>
+              <svg className="icon" viewBox="0 0 24 24">
+                <path d="M12 5v14M5 12h14" />
+              </svg>
             </button>
-          ))}
-        </div>
-      )}
+            <input
+              type="file"
+              id="file-input"
+              ref={fileInputRef}
+              onChange={handleFileChange}
+              hidden
+            />
 
-      {hasRun && (
-        <div className="run">
-          {modelMeta && <div className="run-meta">{modelMeta}</div>}
+            <div className="composer-spacer" />
 
-          {running && (
-            <div className="thinking">
-              <span className="pulse" />
-              <span>{`${statusText} (${elapsedSeconds}s)`}</span>
-            </div>
-          )}
-
-          {steps.length > 0 && (
-            <div className="steps">
-              {steps.map((step, idx) => {
-                const isRunning =
-                  running &&
-                  step.status === 'pending' &&
-                  (idx === 0 || steps[idx - 1].status === 'done');
-                const stateClass = isRunning
-                  ? 'is-running'
-                  : step.status === 'done'
-                  ? 'is-done'
-                  : step.status === 'failed'
-                  ? 'is-failed'
-                  : 'is-pending';
-
-                return (
-                  <div key={idx} className={`step ${stateClass}`}>
-                    <span className="step-marker" />
-                    <div className="step-body">
-                      <div className="step-tool">
-                        {TOOL_LABELS[step.tool] || step.tool}
-                      </div>
-                      <div className="step-input">{step.input}</div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {/* Phase 11 Approval Card */}
-          {resultData?.status === 'awaiting_approval' && (
-            <div
-              className={`card approval-card risk-is-${(
-                resultData.approval?.risk || 'medium'
-              ).toLowerCase()}`}
+            <button
+              className="send-btn"
+              id="send-btn"
+              onClick={() => runTask()}
+              disabled={!taskInput.trim() || running}
+              title="Run task"
             >
-              <p className="section-label">Human Approval Gate</p>
-              <div className="approval-meta">
-                <span
-                  className={`risk-text-${(
-                    resultData.approval?.risk || 'medium'
-                  ).toLowerCase()}`}
-                >
-                  Risk: {(resultData.approval?.risk || 'medium').toUpperCase()}
-                </span>
-                <span className="approval-conf">
-                  · Confidence:{' '}
-                  {resultData.approval?.confidence !== undefined
-                    ? Math.round(resultData.approval.confidence * 100)
-                    : 50}
-                  %
-                </span>
-              </div>
-              <div className="approval-reasoning">
-                {resultData.approval?.reasoning ||
-                  'Document generation paused for human review.'}
-              </div>
-
-              <div className="approval-preview-box">
-                <div className="approval-draft-title">
-                  {resultData.draft_content?.title || 'Document Draft'}
-                </div>
-                {sourceNames.length > 0 && (
-                  <div className="approval-sources-line">
-                    <span className="doc-sources-label">Sources:</span>
-                    <span className="doc-sources-names">
-                      {sourceNames.join(', ')}
-                    </span>
-                  </div>
-                )}
-                {(resultData.draft_content?.sections || []).map((s, sIdx) => (
-                  <div key={sIdx} className="approval-sec">
-                    <div className="approval-sec-heading">
-                      {s.heading || `Section ${sIdx + 1}`}
-                    </div>
-                    <p className="approval-sec-body">{s.body || ''}</p>
-                  </div>
-                ))}
-              </div>
-
-              {!approvalOutcome[resultData.task_id] && (
-                <div className="approval-actions">
-                  <button
-                    className="btn btn-primary"
-                    onClick={() =>
-                      handleApprovalAction(resultData.task_id, 'approve')
-                    }
-                  >
-                    <svg className="icon icon-sm" viewBox="0 0 24 24">
-                      <path d="M20 6L9 17l-5-5" />
-                    </svg>
-                    <span>Approve</span>
-                  </button>
-                  <button
-                    className="btn btn-secondary"
-                    onClick={() =>
-                      setEditingApproval((prev) => ({
-                        ...prev,
-                        [resultData.task_id]: !prev[resultData.task_id],
-                      }))
-                    }
-                  >
-                    <svg className="icon icon-sm" viewBox="0 0 24 24">
-                      <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
-                      <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
-                    </svg>
-                    <span>Edit</span>
-                  </button>
-                  <button
-                    className="btn btn-danger-quiet"
-                    onClick={() =>
-                      handleApprovalAction(resultData.task_id, 'reject')
-                    }
-                  >
-                    <svg className="icon icon-sm" viewBox="0 0 24 24">
-                      <path d="M18 6L6 18M6 6l12 12" />
-                    </svg>
-                    <span>Reject</span>
-                  </button>
-                </div>
-              )}
-
-              {editingApproval[resultData.task_id] &&
-                !approvalOutcome[resultData.task_id] && (
-                  <div className="approval-edit-wrap">
-                    <label className="approval-edit-label">Document Title</label>
-                    <input
-                      className="approval-input"
-                      value={editTitle}
-                      onChange={(e) => setEditTitle(e.target.value)}
-                    />
-                    <label className="approval-edit-label">
-                      Sections Content (JSON)
-                    </label>
-                    <textarea
-                      className="approval-textarea"
-                      rows={6}
-                      value={editSections}
-                      onChange={(e) => setEditSections(e.target.value)}
-                    />
-                    <div className="approval-actions" style={{ marginTop: '8px' }}>
-                      <button
-                        className="btn btn-primary"
-                        onClick={() =>
-                          handleApprovalEditSubmit(resultData.task_id)
-                        }
-                      >
-                        <span>Submit with Edits</span>
-                      </button>
-                      <button
-                        className="btn btn-secondary"
-                        onClick={() =>
-                          setEditingApproval((prev) => ({
-                            ...prev,
-                            [resultData.task_id]: false,
-                          }))
-                        }
-                      >
-                        <span>Cancel</span>
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-              {approvalOutcome[resultData.task_id] && (
-                <div style={{ marginTop: '12px' }}>
-                  {approvalOutcome[resultData.task_id].loading && (
-                    <div className="approval-notice">
-                      {approvalOutcome[resultData.task_id].message}
-                    </div>
-                  )}
-                  {approvalOutcome[resultData.task_id].rejected && (
-                    <p className="error-note">
-                      {approvalOutcome[resultData.task_id].message}
-                    </p>
-                  )}
-                  {approvalOutcome[resultData.task_id].approved && (
-                    <div>
-                      <div
-                        className="approval-notice"
-                        style={{ marginBottom: '10px' }}
-                      >
-                        Document approved successfully!
-                      </div>
-                      <a
-                        className="download-btn"
-                        href={`/download/${encodeURIComponent(
-                          approvalOutcome[resultData.task_id].filename
-                        )}`}
-                        download
-                      >
-                        <svg className="icon icon-sm" viewBox="0 0 24 24">
-                          <path d="M12 4v12M7 13l5 5 5-5" />
-                          <path d="M4 20h16" />
-                        </svg>
-                        <span>
-                          Download{' '}
-                          {approvalOutcome[resultData.task_id].title}
-                        </span>
-                      </a>
-                    </div>
-                  )}
-                  {approvalOutcome[resultData.task_id].error && (
-                    <p className="error-note">
-                      Action failed:{' '}
-                      {approvalOutcome[resultData.task_id].error}
-                    </p>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Standard Text Answer */}
-          {resultData?.result && (
-            <div className="card">
-              <div className="answer">{cleanAnswer || resultData.result}</div>
-            </div>
-          )}
-
-          {/* Referenced Sources Card */}
-          {sourceNames.length > 0 &&
-            resultData?.status !== 'awaiting_approval' && (
-              <div className="card sources-card">
-                <p className="section-label">Referenced Sources</p>
-                <div className="sources-list">
-                  {sourceNames.map((name, i) => (
-                    <div key={i} className="source-item">
-                      <svg className="icon icon-sm" viewBox="0 0 24 24">
-                        <path d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8l-5-5z" />
-                        <path d="M14 3v5h5" />
-                      </svg>
-                      <span className="source-name">{name}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-          {/* Generated Code Execution Cards */}
-          {(resultData?.code_runs || []).map((run, cIdx) => {
-            if (!run.code) return null;
-            const langName =
-              run.language === 'c'
-                ? 'C'
-                : run.language === 'javascript'
-                ? 'JavaScript'
-                : 'Python';
-            const isErr = run.exit_code !== 0 || run.error;
-            const duration =
-              run.duration_seconds !== undefined
-                ? `${run.duration_seconds}s`
-                : '';
-            const exitText =
-              run.exit_code !== undefined ? `exit ${run.exit_code}` : '';
-            const meta = [exitText, duration].filter(Boolean).join(' · ');
-
-            return (
-              <div key={cIdx} className="card code-card">
-                <div className="code-header">
-                  <div className="code-badges">
-                    <span className="section-label" style={{ margin: 0 }}>
-                      Generated Code
-                    </span>
-                    <span className="code-lang-badge">{langName}</span>
-                  </div>
-                  {meta && (
-                    <span
-                      className={`code-meta-badge ${
-                        isErr ? 'is-error' : ''
-                      }`}
-                    >
-                      {meta}
-                    </span>
-                  )}
-                </div>
-
-                <div className="code-wrap">
-                  <button
-                    className="copy-code-btn"
-                    onClick={(e) => handleCopyCode(run.code, e.currentTarget)}
-                    title="Copy code"
-                  >
-                    <svg className="icon" viewBox="0 0 24 24">
-                      <rect x="9" y="9" width="13" height="13" rx="2" />
-                      <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
-                    </svg>
-                    <span>Copy</span>
-                  </button>
-                  <pre className="code-content">
-                    <code>{run.code}</code>
-                  </pre>
-                </div>
-
-                {(run.stdout || run.stderr) && (
-                  <div className="code-output-box">
-                    <div className="code-output-label">Terminal Output</div>
-                    {run.stdout && (
-                      <pre className="code-stdout">{run.stdout}</pre>
-                    )}
-                    {run.stderr && (
-                      <pre className="code-stderr">{run.stderr}</pre>
-                    )}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-
-          {/* Generated Documents */}
-          {(resultData?.generated_files || []).map((file, fIdx) => {
-            if (!file.filename) return null;
-            const fileSources = [
-              ...new Set(
-                (file.sources || rawSources)
-                  .map((s) => (typeof s === 'string' ? s : s?.filename))
-                  .filter(Boolean)
-              ),
-            ];
-
-            return (
-              <div key={fIdx} className="card">
-                <p className="section-label">Generated document</p>
-                <a
-                  className="download-btn"
-                  href={`/download/${encodeURIComponent(file.filename)}`}
-                  download
-                >
-                  <svg className="icon icon-sm" viewBox="0 0 24 24">
-                    <path d="M12 4v12M7 13l5 5 5-5" />
-                    <path d="M4 20h16" />
-                  </svg>
-                  <span>{file.title || file.filename}</span>
-                </a>
-                {fileSources.length > 0 && (
-                  <div className="doc-sources-meta">
-                    <span className="doc-sources-label">
-                      Sources cited in file:
-                    </span>
-                    <span className="doc-sources-names">
-                      {fileSources.join(', ')}
-                    </span>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-
-          {errorMsg && <p className="error-note">{errorMsg}</p>}
-          {resultData?.status === 'failed' && (
-            <p className="error-note">
-              The agent finished with errors — see the steps above.
-            </p>
-          )}
+              <svg className="icon" viewBox="0 0 24 24">
+                <path d="M12 19V5M6 11l6-6 6 6" />
+              </svg>
+            </button>
+          </div>
         </div>
-      )}
+      </div>
     </section>
   );
 }
+
