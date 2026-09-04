@@ -1,20 +1,14 @@
-"""ocr.py — Optical Character Recognition tool supporting dual engines (PaddleOCR & Tesseract).
+"""ocr.py — Optical Character Recognition tool using Tesseract OCR and pypdf.
 
 Priority:
 1. Pure PDF text layer extraction (via pypdf) if real embedded text exists (fast, exact).
-2. PaddleOCR if installed (Primary engine).
-3. Tesseract (via pytesseract) if installed (Fallback engine).
+2. Tesseract OCR (via pytesseract) for image text extraction.
 
 Every OCR run records per-block / average confidence scores, flags low_confidence (< 65%),
 and logs an append-only audit event with external_calls=0.
 """
 
 import os
-# Disable oneDNN / PIR issues on Windows for CPU execution in Paddle
-os.environ["FLAGS_use_mkldnn"] = "0"
-os.environ["FLAGS_enable_pir_api"] = "0"
-os.environ["FLAGS_enable_pir_in_executor"] = "0"
-
 from pathlib import Path
 import re
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -23,110 +17,6 @@ from backend.audit.logbook import log_event
 
 # Threshold below which OCR is flagged for human review
 LOW_CONFIDENCE_THRESHOLD = 0.65
-
-# Lazy-loaded PaddleOCR instance cache
-_PADDLE_OCR_INSTANCE = None
-
-
-def _get_paddle_ocr():
-    global _PADDLE_OCR_INSTANCE
-    if _PADDLE_OCR_INSTANCE is None:
-        try:
-            import paddle
-            try:
-                paddle.set_flags({"FLAGS_use_mkldnn": 0, "FLAGS_enable_pir_api": 0})
-            except Exception:
-                pass
-
-            from paddleocr import PaddleOCR
-            _PADDLE_OCR_INSTANCE = PaddleOCR(lang="en")
-        except Exception as exc:
-            _PADDLE_OCR_INSTANCE = False
-    return _PADDLE_OCR_INSTANCE if _PADDLE_OCR_INSTANCE is not False else None
-
-
-def _parse_paddle_output(results: Any) -> Tuple[str, float, List[Dict[str, Any]]]:
-    """Robustly parses results from both PaddleOCR v2 (nested list) and PaddleOCR v3/PaddleX (dicts)."""
-    lines: List[str] = []
-    confidences: List[float] = []
-    word_boxes: List[Dict[str, Any]] = []
-
-    if not results:
-        return "", 0.0, []
-
-    first = results[0] if isinstance(results, list) and len(results) > 0 else results
-
-    if isinstance(first, dict):
-        if "rec_texts" in first:
-            texts = first.get("rec_texts", [])
-            scores = first.get("rec_scores", [])
-            boxes = first.get("dt_polys", first.get("rec_boxes", []))
-            for i, text in enumerate(texts):
-                t = str(text).strip()
-                score = float(scores[i]) if i < len(scores) else 1.0
-                box = boxes[i].tolist() if i < len(boxes) and hasattr(boxes[i], "tolist") else (boxes[i] if i < len(boxes) else [])
-                if t:
-                    lines.append(t)
-                    confidences.append(score)
-                    word_boxes.append({"text": t, "confidence": score, "box": box})
-        elif "ocr_result" in first:
-            return _parse_paddle_output([first["ocr_result"]])
-        elif "text" in first or "transcription" in first:
-            for item in (results if isinstance(results, list) else [results]):
-                if isinstance(item, dict):
-                    t = str(item.get("text", item.get("transcription", ""))).strip()
-                    score = float(item.get("score", item.get("confidence", 1.0)))
-                    box = item.get("points", item.get("box", []))
-                    if t:
-                        lines.append(t)
-                        confidences.append(score)
-                        word_boxes.append({"text": t, "confidence": score, "box": box})
-
-    elif isinstance(first, list):
-        for line in first:
-            if isinstance(line, list) and len(line) == 2:
-                box, text_conf = line
-                if isinstance(text_conf, (list, tuple)) and len(text_conf) >= 2:
-                    t = str(text_conf[0]).strip()
-                    score = float(text_conf[1])
-                else:
-                    t = str(text_conf).strip()
-                    score = 1.0
-                if t:
-                    lines.append(t)
-                    confidences.append(score)
-                    word_boxes.append({"text": t, "confidence": score, "box": box})
-            elif isinstance(line, dict):
-                t = str(line.get("text", line.get("transcription", ""))).strip()
-                score = float(line.get("score", line.get("confidence", 1.0)))
-                box = line.get("points", line.get("box", []))
-                if t:
-                    lines.append(t)
-                    confidences.append(score)
-                    word_boxes.append({"text": t, "confidence": score, "box": box})
-
-    avg_conf = sum(confidences) / len(confidences) if confidences else 0.0
-    return "\n".join(lines), round(avg_conf, 4), word_boxes
-
-
-def _run_paddle_ocr(img_path: Union[str, Path]) -> Optional[Dict[str, Any]]:
-    """Runs PaddleOCR on an image file path."""
-    ocr_engine = _get_paddle_ocr()
-    if ocr_engine is None:
-        return None
-
-    try:
-        results = ocr_engine.ocr(str(img_path))
-        full_text, avg_conf, word_boxes = _parse_paddle_output(results)
-
-        return {
-            "text": full_text,
-            "confidence": avg_conf,
-            "engine": "paddleocr",
-            "word_boxes": word_boxes,
-        }
-    except Exception:
-        return None
 
 
 def _run_tesseract_ocr(img_input) -> Optional[Dict[str, Any]]:
@@ -203,23 +93,17 @@ def _run_tesseract_ocr(img_input) -> Optional[Dict[str, Any]]:
 
 
 def run_ocr(image_path: Union[str, Path]) -> Dict[str, Any]:
-    """Runs OCR using the best available engine (PaddleOCR -> Tesseract)."""
+    """Runs OCR on an image file using Tesseract OCR."""
     p = Path(image_path)
     if not p.exists():
         raise FileNotFoundError(f"Image file not found: {image_path}")
 
-    # 1. Try PaddleOCR first
-    result = _run_paddle_ocr(p)
-    
-    # 2. Fall back to Tesseract
-    if result is None:
-        result = _run_tesseract_ocr(p)
+    result = _run_tesseract_ocr(p)
 
-    # 3. If neither worked
     if result is None:
         raise RuntimeError(
-            "No OCR engine available. Please install either PaddleOCR (`pip install paddlepaddle paddleocr`) "
-            "or Tesseract (`pip install pytesseract` + Tesseract binary from https://github.com/UB-Mannheim/tesseract/wiki)."
+            "No OCR engine available. Please install Tesseract (`pip install pytesseract` "
+            "+ Tesseract binary from https://github.com/UB-Mannheim/tesseract/wiki)."
         )
 
     confidence = result.get("confidence", 0.0)
