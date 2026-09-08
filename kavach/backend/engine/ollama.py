@@ -1,8 +1,9 @@
-"""ollama.py — Thin synchronous client communicating strictly with local Ollama daemon."""
-
+import asyncio
 import base64
+import json
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+import re
+from typing import Any, AsyncGenerator, Dict, List, Optional, Union
 import httpx
 
 from backend import config
@@ -11,6 +12,11 @@ from backend import config
 class OllamaError(RuntimeError):
     """Raised when Ollama is unreachable or returns an error."""
     pass
+
+
+# Global tracking of active pulls: model_name -> httpx.AsyncClient
+active_pulls: Dict[str, httpx.AsyncClient] = {}
+
 
 
 def _get_client(timeout: float = 120.0) -> httpx.Client:
@@ -32,7 +38,15 @@ def generate(model: str, prompt: str, system: Optional[str] = None) -> str:
             resp = client.post("/api/generate", json=payload)
             resp.raise_for_status()
             data = resp.json()
-            return data.get("response", "")
+            text = data.get("response", "").strip()
+            if not text:
+                raise OllamaError(
+                    f"Ollama model '{model}' returned an empty response. "
+                    "The model may have run out of context, be overloaded, or encountered a generation error."
+                )
+            return text
+    except OllamaError:
+        raise
     except httpx.ConnectError as exc:
         raise OllamaError(
             f"Cannot connect to local Ollama at {config.OLLAMA_BASE_URL}. "
@@ -115,3 +129,177 @@ def list_models() -> List[str]:
         ) from exc
     except Exception as exc:
         raise OllamaError(f"Failed to list local Ollama models: {exc}") from exc
+
+
+def pull_model(model: str) -> bool:
+    """Pulls a model from the Ollama registry."""
+    payload: Dict[str, Any] = {"name": model, "stream": False}
+    try:
+        with _get_client(timeout=3600.0) as client:
+            resp = client.post("/api/pull", json=payload)
+            resp.raise_for_status()
+            return True
+    except httpx.ConnectError as exc:
+        raise OllamaError(
+            f"Cannot connect to local Ollama at {config.OLLAMA_BASE_URL}. "
+            "Please ensure Ollama is running (`ollama serve`)."
+        ) from exc
+    except httpx.HTTPStatusError as exc:
+        raise OllamaError(f"Ollama returned HTTP error: {exc.response.status_code} - {exc.response.text}") from exc
+    except Exception as exc:
+        raise OllamaError(f"Ollama pull failed: {exc}") from exc
+
+
+def delete_model(model: str) -> bool:
+    """Deletes a model from the local Ollama registry."""
+    payload: Dict[str, Any] = {"name": model}
+    try:
+        with _get_client(timeout=60.0) as client:
+            resp = client.request("DELETE", "/api/delete", json=payload)
+            resp.raise_for_status()
+            return True
+    except httpx.ConnectError as exc:
+        raise OllamaError(
+            f"Cannot connect to local Ollama at {config.OLLAMA_BASE_URL}. "
+            "Please ensure Ollama is running (`ollama serve`)."
+        ) from exc
+    except httpx.HTTPStatusError as exc:
+        raise OllamaError(f"Ollama returned HTTP error: {exc.response.status_code} - {exc.response.text}") from exc
+    except Exception as exc:
+        raise OllamaError(f"Ollama delete failed: {exc}") from exc
+
+
+def get_model_tags_and_quants(model_name: str) -> Dict[str, Any]:
+    """Queries official Ollama library registry for available model tags, sizes, and quantizations."""
+    model_clean = model_name.strip().lower()
+    if not model_clean:
+        return {"available": False, "error": "Model name cannot be empty", "tags": []}
+
+    base_name = model_clean.split(":")[0]
+    url = f"https://ollama.com/library/{base_name}/tags"
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+
+    try:
+        with httpx.Client(timeout=10.0, follow_redirects=True) as web_client:
+            r = web_client.get(url, headers=headers)
+            if r.status_code == 404:
+                return {
+                    "available": False,
+                    "base_name": base_name,
+                    "error": f"Model '{base_name}' was not found in the Ollama library.",
+                    "tags": [],
+                }
+            if r.status_code != 200:
+                return {
+                    "available": False,
+                    "base_name": base_name,
+                    "error": f"Ollama registry returned HTTP {r.status_code}",
+                    "tags": [],
+                }
+
+            pattern = re.compile(
+                rf'<a href="/library/{re.escape(base_name)}:([^"]+)"[^>]*>\s*([^\s<]+)\s*</a>\s*(?:<input[^>]*>)?\s*(?:<button[\s\S]*?</button>)?\s*</span>\s*<p class="[^"]*">([^<]+)</p>'
+            )
+            matches = pattern.findall(r.text)
+
+            tags_list = []
+            seen = set()
+            for tag_slug, tag_name, size in matches:
+                if tag_slug in seen:
+                    continue
+                seen.add(tag_slug)
+
+                quant = "Default"
+                quant_match = re.search(r'(q[0-9]_[a-z0-9_]+|fp16|f16|fp32|f32|bf16)', tag_slug, re.IGNORECASE)
+                if quant_match:
+                    quant = quant_match.group(1).upper()
+                elif "fp16" in tag_slug.lower() or "f16" in tag_slug.lower():
+                    quant = "FP16"
+
+                param_match = re.search(r'([0-9]+(?:\.[0-9]+)?b)', tag_slug, re.IGNORECASE)
+                param_size = param_match.group(1).lower() if param_match else ""
+
+                tags_list.append({
+                    "tag": tag_slug,
+                    "full_name": f"{base_name}:{tag_slug}",
+                    "size": size.strip(),
+                    "quantization": quant,
+                    "param_size": param_size,
+                })
+
+            return {
+                "available": True,
+                "base_name": base_name,
+                "total_tags": len(tags_list),
+                "tags": tags_list,
+            }
+    except httpx.ConnectError:
+        return {
+            "available": False,
+            "base_name": base_name,
+            "error": "Could not connect to ollama.com. Please check your internet connection.",
+            "tags": [],
+        }
+    except Exception as e:
+        return {
+            "available": False,
+            "base_name": base_name,
+            "error": str(e),
+            "tags": [],
+        }
+
+
+async def stream_pull_model(model: str) -> AsyncGenerator[str, None]:
+    """Streams pull progress directly from Ollama as Server-Sent Events (SSE)."""
+    client = httpx.AsyncClient(
+        base_url=config.OLLAMA_BASE_URL,
+        timeout=httpx.Timeout(3600.0, connect=15.0),
+    )
+    active_pulls[model] = client
+    try:
+        async with client.stream("POST", "/api/pull", json={"name": model, "stream": True}) as resp:
+            resp.raise_for_status()
+            async for line in resp.aiter_lines():
+                if not line.strip():
+                    continue
+                try:
+                    data = json.loads(line)
+                    total = data.get("total", 0)
+                    completed = data.get("completed", 0)
+                    percentage = 0.0
+                    if total > 0:
+                        percentage = round((completed / total) * 100, 1)
+
+                    event_data = {
+                        "status": data.get("status", ""),
+                        "digest": data.get("digest", ""),
+                        "total": total,
+                        "completed": completed,
+                        "percentage": percentage,
+                    }
+                    yield f"data: {json.dumps(event_data)}\n\n"
+                except Exception:
+                    continue
+    except asyncio.CancelledError:
+        yield f"data: {json.dumps({'status': 'cancelled', 'error': 'Pull was stopped by user'})}\n\n"
+        raise
+    except httpx.RequestError as exc:
+        yield f"data: {json.dumps({'status': 'error', 'error': str(exc)})}\n\n"
+    except Exception as exc:
+        yield f"data: {json.dumps({'status': 'error', 'error': str(exc)})}\n\n"
+    finally:
+        active_pulls.pop(model, None)
+        await client.aclose()
+
+
+async def cancel_pull_model(model: str) -> bool:
+    """Terminates an active pull connection to Ollama immediately."""
+    client = active_pulls.get(model)
+    if client:
+        try:
+            await client.aclose()
+        finally:
+            active_pulls.pop(model, None)
+        return True
+    return False
+

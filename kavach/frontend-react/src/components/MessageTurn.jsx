@@ -22,12 +22,15 @@ export default function MessageTurn({
   user,
   onApprovalAction,
   onApprovalEditSubmit,
+  onClarifyReply,
   onRetry,
 }) {
   const [copiedCodeIdx, setCopiedCodeIdx] = useState(null);
   const [editingApproval, setEditingApproval] = useState(false);
   const [editTitle, setEditTitle] = useState('');
   const [editSections, setEditSections] = useState('');
+  const [clarifyInput, setClarifyInput] = useState('');
+  const [showReasoning, setShowReasoning] = useState(false);
 
   // Extract turn properties whether from live streaming or persisted DB record
   const isUser = turn.role === 'user';
@@ -35,23 +38,38 @@ export default function MessageTurn({
   const isError = turn.is_error || turn.status === 'failed';
   const meta = turn.meta || {};
 
-  // Extract model metadata
-  const modelMeta = useMemo(() => {
-    if (turn.modelMeta) return turn.modelMeta;
-    if (meta.model_used) return `Model · ${meta.model_used}`;
-    if (meta.routing_decision?.model_role) {
-      const role = meta.routing_decision.model_role;
-      return `${MODEL_LABELS[role] || role} · ${meta.routing_decision.model_tag || ''}`;
-    }
-    return '';
-  }, [turn.modelMeta, meta]);
-
   // Extract steps
   const steps = useMemo(() => {
     if (turn.steps && turn.steps.length > 0) return turn.steps;
     if (meta.steps && meta.steps.length > 0) return meta.steps;
     return [];
   }, [turn.steps, meta.steps]);
+
+  // Extract model metadata
+  const modelMeta = useMemo(() => {
+    if (turn.modelMeta) return turn.modelMeta;
+    if (meta.models_used && meta.models_used.length > 1) {
+      return `Models · ${meta.models_used.join(' → ')}`;
+    }
+    const distinctStepModels = Array.from(
+      new Set(
+        steps
+          .map((s) => s.model)
+          .filter((m) => m && !m.endsWith('_tool') && m !== 'vault_search')
+      )
+    );
+    if (distinctStepModels.length > 1) {
+      return `Models · ${distinctStepModels.join(' → ')}`;
+    }
+    if (meta.model_used) return `Model · ${meta.model_used}`;
+    if (distinctStepModels.length === 1) return `Model · ${distinctStepModels[0]}`;
+    if (meta.routing_decision?.model_role) {
+      const role = meta.routing_decision.model_role;
+      return `${MODEL_LABELS[role] || role} · ${meta.routing_decision.model_tag || ''}`;
+    }
+    return '';
+  }, [turn.modelMeta, meta, steps]);
+
 
   // Extract code executions
   const codeRuns = useMemo(() => {
@@ -233,8 +251,26 @@ export default function MessageTurn({
                 <div key={idx} className={`step ${stateClass}`}>
                   <span className="step-marker" />
                   <div className="step-body">
-                    <div className="step-tool">
-                      {TOOL_LABELS[step.tool] || step.tool}
+                    <div className="step-tool-row">
+                      <div className="step-tool">
+                        {TOOL_LABELS[step.tool] || step.tool}
+                      </div>
+                      {(step.model || step.model_role) && (
+                        <span
+                          className="step-model-tag"
+                          title={`Executed with model: ${step.model || step.model_role}`}
+                        >
+                          <svg className="icon icon-xs" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth="2"
+                              d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"
+                            />
+                          </svg>
+                          <span>{step.model || step.model_role}</span>
+                        </span>
+                      )}
                     </div>
                     <div className="step-input">{step.input}</div>
                   </div>
@@ -377,6 +413,99 @@ export default function MessageTurn({
           </div>
         )}
 
+        {/* Interactive Clarification Request from Agent */}
+        {(turn.clarify_question || meta.clarify_question) && (
+          <div className="card clarify-card" style={{ borderLeft: '3px solid #f59e0b', background: 'rgba(245, 158, 11, 0.06)', padding: '16px', borderRadius: '8px', marginBottom: '16px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#f59e0b', fontWeight: 600, marginBottom: '8px' }}>
+              <svg className="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                <circle cx="12" cy="12" r="10" strokeWidth="2" />
+                <path d="M12 16v-4M12 8h.01" strokeWidth="2" strokeLinecap="round" />
+              </svg>
+              <span>Operator Clarification Needed</span>
+            </div>
+            <p style={{ margin: '0 0 12px 0', fontSize: '0.95rem', color: 'var(--text-primary, #e2e8f0)' }}>
+              {turn.clarify_question || meta.clarify_question}
+            </p>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <input
+                type="text"
+                className="input"
+                placeholder="Type your response to continue workflow..."
+                value={clarifyInput}
+                onChange={(e) => setClarifyInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && clarifyInput.trim()) {
+                    if (onClarifyReply) onClarifyReply(turn.task_id || meta.task_id, clarifyInput);
+                    setClarifyInput('');
+                  }
+                }}
+                style={{ flex: 1, padding: '8px 12px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(0,0,0,0.25)', color: '#fff' }}
+              />
+              <button
+                className="btn btn-primary"
+                onClick={() => {
+                  if (clarifyInput.trim()) {
+                    if (onClarifyReply) onClarifyReply(turn.task_id || meta.task_id, clarifyInput);
+                    setClarifyInput('');
+                  }
+                }}
+              >
+                Send Answer
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Autonomous Reasoning & Self-Correction Trail */}
+        {((turn.trace || meta.trace || []).length > 0) && (
+          <div className="card reasoning-card" style={{ marginBottom: '12px', background: 'rgba(255,255,255,0.02)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.07)' }}>
+            <button
+              onClick={() => setShowReasoning(!showReasoning)}
+              style={{
+                width: '100%',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                background: 'transparent',
+                border: 'none',
+                padding: '10px 14px',
+                color: 'var(--text-secondary, #94a3b8)',
+                cursor: 'pointer',
+                fontSize: '0.85rem',
+              }}
+            >
+              <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <svg className="icon icon-xs" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                  <path strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+                Agent Reasoning & Self-Correction Trail ({(turn.trace || meta.trace || []).length} steps)
+              </span>
+              <span>{showReasoning ? '▲ Hide' : '▼ View'}</span>
+            </button>
+            {showReasoning && (
+              <div style={{ padding: '6px 14px 12px 14px', borderTop: '1px solid rgba(255,255,255,0.06)', fontSize: '0.8rem', fontFamily: 'monospace' }}>
+                {(turn.trace || meta.trace || []).map((tr, tIdx) => (
+                  <div key={tIdx} style={{ margin: '6px 0', color: tr.role === 'thought' ? '#38bdf8' : (tr.role === 'action' ? '#c084fc' : '#94a3b8') }}>
+                    <strong style={{ textTransform: 'uppercase', marginRight: '6px' }}>[{tr.role}]:</strong>
+                    <span>{tr.content}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Extracted Key Facts */}
+        {(Object.keys(turn.key_facts || meta.key_facts || {}).length > 0) && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '12px' }}>
+            {Object.entries(turn.key_facts || meta.key_facts || {}).map(([k, v]) => (
+              <span key={k} style={{ fontSize: '0.75rem', padding: '3px 8px', borderRadius: '4px', background: 'rgba(56, 189, 248, 0.08)', color: '#38bdf8', border: '1px solid rgba(56, 189, 248, 0.25)' }}>
+                <strong>{k}:</strong> {typeof v === 'object' ? JSON.stringify(v) : String(v)}
+              </span>
+            ))}
+          </div>
+        )}
+
         {/* Standard Text Answer */}
         {cleanAnswer && (
           <div className="card answer-card">
@@ -402,62 +531,10 @@ export default function MessageTurn({
           </div>
         )}
 
-        {/* Generated Code Execution Cards */}
-        {codeRuns.map((run, cIdx) => {
-          if (!run.code) return null;
-          const langName =
-            run.language === 'c'
-              ? 'C'
-              : run.language === 'javascript'
-              ? 'JavaScript'
-              : 'Python';
-          const isErr = run.exit_code !== 0 || run.error;
-          const duration =
-            run.duration_seconds !== undefined ? `${run.duration_seconds}s` : '';
-          const exitText = run.exit_code !== undefined ? `exit ${run.exit_code}` : '';
-          const metaStr = [exitText, duration].filter(Boolean).join(' · ');
-
-          return (
-            <div key={cIdx} className="card code-card">
-              <div className="code-header">
-                <div className="code-badges">
-                  <span className="section-label" style={{ margin: 0 }}>Generated Code</span>
-                  <span className="code-lang-badge">{langName}</span>
-                </div>
-                {metaStr && (
-                  <span className={`code-meta-badge ${isErr ? 'is-error' : ''}`}>
-                    {metaStr}
-                  </span>
-                )}
-              </div>
-
-              <div className="code-wrap">
-                <button
-                  className="copy-code-btn"
-                  onClick={() => handleCopy(run.code, cIdx)}
-                  title="Copy code"
-                >
-                  <svg className="icon" viewBox="0 0 24 24">
-                    <rect x="9" y="9" width="13" height="13" rx="2" />
-                    <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
-                  </svg>
-                  <span>{copiedCodeIdx === cIdx ? 'Copied!' : 'Copy'}</span>
-                </button>
-                <pre className="code-content">
-                  <code>{run.code}</code>
-                </pre>
-              </div>
-
-              {(run.stdout || run.stderr) && (
-                <div className="code-output-box">
-                  <div className="code-output-label">Terminal Output</div>
-                  {run.stdout && <pre className="code-stdout">{run.stdout}</pre>}
-                  {run.stderr && <pre className="code-stderr">{run.stderr}</pre>}
-                </div>
-              )}
-            </div>
-          );
-        })}
+        {/* Generated Code Execution Cards (Consolidated & Interactive) */}
+        {codeRuns.map((run, cIdx) => (
+          <InteractiveCodeCard key={cIdx} run={run} cIdx={cIdx} />
+        ))}
 
         {/* Generated Documents */}
         {generatedFiles.map((file, fIdx) => {
@@ -516,4 +593,240 @@ export default function MessageTurn({
     </div>
   );
 }
+
+function InteractiveCodeCard({ run, cIdx }) {
+  const [copied, setCopied] = useState(false);
+  const [selectedAttemptIdx, setSelectedAttemptIdx] = useState(-1);
+  const [isEditing, setIsEditing] = useState(false);
+  const [code, setCode] = useState(run.code || '');
+  const [userInput, setUserInput] = useState('');
+  const [isRunning, setIsRunning] = useState(false);
+  const [executionResult, setExecutionResult] = useState(null);
+  const [showInputDrawer, setShowInputDrawer] = useState(false);
+
+  React.useEffect(() => {
+    setCode(run.code || '');
+    setExecutionResult(null);
+  }, [run.code]);
+
+  const allAttempts = useMemo(() => {
+    const prev = run.revisions || [];
+    return [...prev, run];
+  }, [run]);
+
+  const hasRevisions = allAttempts.length > 1;
+  const isViewingHistorical = selectedAttemptIdx >= 0 && selectedAttemptIdx < allAttempts.length - 1;
+  const currentItem = isViewingHistorical ? allAttempts[selectedAttemptIdx] : null;
+
+  const displayCode = currentItem ? currentItem.code : code;
+  const displayLang = (currentItem ? currentItem.language : run.language) || 'python';
+  const langName = displayLang === 'c' ? 'C' : displayLang === 'javascript' ? 'JavaScript' : 'Python';
+
+  const activeData = executionResult || currentItem || run;
+  const isErr = activeData.exit_code !== 0 || activeData.error;
+  const duration = activeData.duration_seconds !== undefined ? `${activeData.duration_seconds}s` : '';
+  const exitText = activeData.exit_code !== undefined ? `exit ${activeData.exit_code}` : '';
+  const metaStr = [exitText, duration].filter(Boolean).join(' · ');
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(displayCode).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
+  const handleRunInSandbox = async () => {
+    try {
+      setIsRunning(true);
+      const res = await fetch('/code/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          code: displayCode,
+          language: displayLang,
+          stdin: userInput || null,
+        }),
+      });
+      if (!res.ok) throw new Error(`Server returned HTTP ${res.status}`);
+      const data = await res.json();
+      setExecutionResult(data);
+    } catch (err) {
+      setExecutionResult({
+        success: false,
+        stdout: '',
+        stderr: `Execution failed: ${err.message}`,
+        exit_code: -1,
+        duration_seconds: 0.0,
+      });
+    } finally {
+      setIsRunning(false);
+    }
+  };
+
+  return (
+    <div className="card code-card interactive-code-card">
+      <div className="code-header">
+        <div className="code-badges">
+          <span className="section-label" style={{ margin: 0 }}>Generated Code</span>
+          <span className="code-lang-badge">{langName}</span>
+          {hasRevisions && (
+            <span className="revision-pill">
+              Attempt {isViewingHistorical ? selectedAttemptIdx + 1 : allAttempts.length} of {allAttempts.length}
+            </span>
+          )}
+        </div>
+        <div className="code-header-right">
+          {metaStr && (
+            <span className={`code-meta-badge ${isErr ? 'is-error' : 'is-success'}`}>
+              {metaStr}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Revision Switcher Tabs if multiple attempts occurred */}
+      {hasRevisions && (
+        <div className="code-revision-tabs">
+          <span className="revision-tabs-label">Revisions:</span>
+          {allAttempts.map((att, aIdx) => {
+            const isLast = aIdx === allAttempts.length - 1;
+            const isSelected = isLast ? (!isViewingHistorical) : (selectedAttemptIdx === aIdx);
+            const label = isLast
+              ? `Latest (Attempt ${aIdx + 1})`
+              : `Attempt ${aIdx + 1} (${att.exit_code === 0 ? 'Passed' : 'Failed'})`;
+            return (
+              <button
+                key={aIdx}
+                type="button"
+                className={`rev-tab-btn ${isSelected ? 'active' : ''} ${att.exit_code !== 0 ? 'had-error' : ''}`}
+                onClick={() => {
+                  setSelectedAttemptIdx(isLast ? -1 : aIdx);
+                  setIsEditing(false);
+                  setExecutionResult(null);
+                }}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Code Editor or Viewer */}
+      <div className="code-wrap">
+        <div className="code-actions-bar">
+          <button
+            type="button"
+            className="code-action-btn"
+            onClick={() => setIsEditing(!isEditing)}
+            title={isEditing ? "View code" : "Edit code"}
+          >
+            <svg className="icon" viewBox="0 0 24 24" width="13" height="13" stroke="currentColor" fill="none">
+              <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+            <span>{isEditing ? "Done Editing" : "Edit"}</span>
+          </button>
+          <button
+            type="button"
+            className="code-action-btn"
+            onClick={handleCopy}
+            title="Copy code"
+          >
+            <svg className="icon" viewBox="0 0 24 24" width="13" height="13">
+              <rect x="9" y="9" width="13" height="13" rx="2" />
+              <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
+            </svg>
+            <span>{copied ? "Copied!" : "Copy"}</span>
+          </button>
+        </div>
+
+        {isEditing ? (
+          <textarea
+            className="code-editor-textarea"
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+            rows={Math.max(6, Math.min(22, code.split('\n').length + 1))}
+            spellCheck="false"
+          />
+        ) : (
+          <pre className="code-content">
+            <code>{displayCode}</code>
+          </pre>
+        )}
+      </div>
+
+      {/* Interactive Controls & Stdin Drawer Toggle */}
+      <div className="code-interactive-controls">
+        <div className="controls-left">
+          <button
+            type="button"
+            className={`btn-toggle-stdin ${showInputDrawer || userInput ? 'active' : ''}`}
+            onClick={() => setShowInputDrawer(!showInputDrawer)}
+          >
+            <svg className="icon" viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" fill="none">
+              <polyline points="4 17 10 11 4 5" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              <line x1="12" y1="19" x2="20" y2="19" strokeWidth="2" strokeLinecap="round"/>
+            </svg>
+            <span>{showInputDrawer ? "Hide Terminal Input (stdin)" : (userInput ? "Terminal Input (stdin): Active" : "Provide Input (stdin)")}</span>
+          </button>
+        </div>
+
+        <div className="controls-right">
+          <button
+            type="button"
+            className="btn btn-sm btn-run-sandbox"
+            onClick={handleRunInSandbox}
+            disabled={isRunning}
+          >
+            {isRunning ? (
+              <>
+                <span className="spinner-micro"></span>
+                <span>Executing in Docker...</span>
+              </>
+            ) : (
+              <>
+                <svg className="icon" viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+                  <polygon points="5 3 19 12 5 21 5 3"/>
+                </svg>
+                <span>Run in Sandbox</span>
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+
+      {/* Stdin Drawer */}
+      {showInputDrawer && (
+        <div className="stdin-drawer">
+          <div className="stdin-header">
+            <span className="stdin-title">Standard Input (stdin passed to script):</span>
+          </div>
+          <textarea
+            className="stdin-textarea"
+            placeholder="Type input values here (e.g. name, values, lines of text to send to input())..."
+            value={userInput}
+            onChange={(e) => setUserInput(e.target.value)}
+            rows={2}
+          />
+        </div>
+      )}
+
+      {/* Terminal Output */}
+      {(activeData.stdout || activeData.stderr) && (
+        <div className="code-output-box">
+          <div className="code-output-header">
+            <span className="code-output-label">Terminal Output</span>
+            {activeData.duration_seconds !== undefined && (
+              <span className="output-time-tag">{activeData.duration_seconds}s</span>
+            )}
+          </div>
+          {activeData.stdout && <pre className="code-stdout">{activeData.stdout}</pre>}
+          {activeData.stderr && <pre className="code-stderr">{activeData.stderr}</pre>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 

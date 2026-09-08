@@ -12,9 +12,9 @@ from pydantic import BaseModel
 
 from backend.engine import ollama, registry
 
-TaskType = Literal["document", "code", "calc", "search", "vision"]
+TaskType = Literal["document", "code", "calc", "search", "vision", "ocr", "llm"]
 
-VALID_TASK_TYPES: List[str] = ["document", "code", "calc", "search", "vision"]
+VALID_TASK_TYPES: List[str] = ["document", "code", "calc", "search", "vision", "ocr", "llm"]
 
 # task_type -> which model role in models.json should handle it
 MODEL_ROLE_BY_TASK_TYPE = {
@@ -23,15 +23,19 @@ MODEL_ROLE_BY_TASK_TYPE = {
     "calc": "reasoning",
     "code": "code",
     "vision": "vision",
+    "ocr": "reasoning",
+    "llm": "reasoning",
 }
 
-# task_type -> stub tools this kind of task is expected to need (Phase 2: stubs only)
+# task_type -> tools this kind of task is expected to need
 TOOLS_BY_TASK_TYPE = {
-    "document": [],
-    "search": ["search_stub"],
-    "calc": ["calc_stub"],
-    "code": [],
-    "vision": ["vision_stub"],
+    "document": ["document"],
+    "search": ["search"],
+    "calc": ["calc"],
+    "code": ["code"],
+    "vision": ["vision"],
+    "ocr": ["ocr"],
+    "llm": ["llm"],
 }
 
 # Keyword banks used for pure rule-based scoring. Deliberately simple/cheap.
@@ -82,7 +86,15 @@ _KEYWORDS = {
     ],
     "vision": [
         "image", "photo", "picture", "screenshot", "diagram shown",
-        "this image", "in the picture",
+        "this image", "in the picture", "schematic", "gauge", "inspect drawing",
+    ],
+    "ocr": [
+        "ocr", "scan", "scanned", "scanned document", "extract text from image",
+        "read text from", "read scan", "transcribe image", "inspection sheet",
+    ],
+    "llm": [
+        "explain", "what is", "why is", "how does", "tell me about", "chat",
+        "conversation", "general question", "who is", "help me understand",
     ],
 }
 
@@ -110,7 +122,7 @@ def _llm_classify(task: str) -> str:
     model = registry.get_model("reasoning")
     prompt = (
         "Classify the user's task into exactly one category word from this list: "
-        "document, code, calc, search, vision.\n"
+        "document, code, calc, search, vision, ocr, llm.\n"
         "Respond with ONLY that single lowercase word — no punctuation, no explanation.\n\n"
         f"Task: {task}"
     )
@@ -127,9 +139,34 @@ def _llm_classify(task: str) -> str:
 IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".webp")
 
 
-def route(task: str, attachment_type: Optional[str] = None) -> RoutingDecision:
-    """Rule-based router. Returns a RoutingDecision with an explainable reason."""
+def route(
+    task: str,
+    attachment_type: Optional[str] = None,
+    hint: Optional[str] = None,
+    context: Optional[str] = None,
+) -> RoutingDecision:
+    """Rule-based router with optional planner hint support. Returns a RoutingDecision."""
     task_lower = (task or "").lower()
+
+    # If planner explicitly hinted a valid specialized tool, respect the planner's architecture
+    normalized_hint = (hint or "").strip().lower()
+    if normalized_hint in VALID_TASK_TYPES and normalized_hint != "llm":
+        return RoutingDecision(
+            task_type=normalized_hint,  # type: ignore[arg-type]
+            model_role=MODEL_ROLE_BY_TASK_TYPE[normalized_hint],
+            tools_needed=TOOLS_BY_TASK_TYPE[normalized_hint],
+            reason=f"planner designated tool '{normalized_hint}' directly assigned",
+        )
+
+    # OCR detection takes priority over generic vision for text reading
+    if any(w in task_lower for w in ["ocr", "scan", "scanned document", "read text from image"]):
+        task_type = "ocr"
+        return RoutingDecision(
+            task_type=task_type,
+            model_role=MODEL_ROLE_BY_TASK_TYPE[task_type],
+            tools_needed=TOOLS_BY_TASK_TYPE[task_type],
+            reason="explicit OCR / scanning keywords detected",
+        )
 
     # Strong structural signal: an image attachment or image filename means vision, no ambiguity.
     has_image_ext = any(ext in task_lower for ext in IMAGE_EXTENSIONS)
@@ -154,17 +191,22 @@ def route(task: str, attachment_type: Optional[str] = None) -> RoutingDecision:
         task_type = best_cat
         reason = f"rule-based keyword match: '{best_cat}' scored {best_score} (next best {second_score})"
     else:
-        # Either no keywords matched at all, or there's a genuine tie -> ambiguous.
-        task_type = _llm_classify(task)
-        if task_type not in VALID_TASK_TYPES:
-            task_type = "document"
-        reason = (
-            f"ambiguous rule-based scores {scores} -> single fallback LLM "
-            f"classification call returned '{task_type}'"
-        )
+        # If hint was provided, use it over generic LLM classification fallback
+        if normalized_hint in VALID_TASK_TYPES:
+            task_type = normalized_hint
+            reason = f"ambiguous scores -> resolved to planner hint '{normalized_hint}'"
+        else:
+            # Either no keywords matched at all, or there's a genuine tie -> ambiguous.
+            task_type = _llm_classify(task)
+            if task_type not in VALID_TASK_TYPES:
+                task_type = "document"
+            reason = (
+                f"ambiguous rule-based scores {scores} -> single fallback LLM "
+                f"classification call returned '{task_type}'"
+            )
 
     return RoutingDecision(
-        task_type=task_type,
+        task_type=task_type,  # type: ignore[arg-type]
         model_role=MODEL_ROLE_BY_TASK_TYPE[task_type],
         tools_needed=TOOLS_BY_TASK_TYPE[task_type],
         reason=reason,

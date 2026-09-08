@@ -45,8 +45,20 @@ UNGROUNDED_INDICATORS = [
 
 
 def _check_is_grounded(answer: str) -> bool:
-    """Returns False if the model admitted the question is not covered by the excerpts."""
-    ans_lower = answer.lower()
+    """Returns False if the model admitted the question is completely uncovered by the excerpts."""
+    ans_lower = answer.lower().strip()
+    # Direct explicit refusals with no content
+    if any(ans_lower.startswith(prefix) for prefix in [
+        "i don't have enough information",
+        "i do not have enough information",
+        "no information provided",
+        "cannot find information",
+        "not enough information",
+    ]):
+        return False
+    # If the answer references the retrieved source documents and provides excerpts
+    if any(ext in ans_lower for ext in [".md", ".docx", ".pdf", ".txt", "source:", "source(s)"]):
+        return True
     return not any(indicator in ans_lower for indicator in UNGROUNDED_INDICATORS)
 
 

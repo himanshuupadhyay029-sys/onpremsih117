@@ -18,6 +18,7 @@ export default defineConfig(({ mode }) => {
         '/auth': backendTarget,
         '/chats': backendTarget,
         '/models': backendTarget,
+        '/code': backendTarget,
         '/health': backendTarget,
         '/shield': {
           target: backendTarget,

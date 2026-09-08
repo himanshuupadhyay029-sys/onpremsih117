@@ -193,9 +193,22 @@ export default function NewTaskScreen({
     const after = events.slice(planIndex + 1);
 
     for (const event of after) {
-      if (event.event_type !== 'step') continue;
-      const step = rawSteps.find((s) => s.step_num === event.metadata?.step_num);
-      if (step) step.status = event.metadata?.error ? 'failed' : 'done';
+      if (event.event_type === 'route') {
+        const step = rawSteps.find((s) => s.step_num === event.metadata?.step_num);
+        if (step) {
+          if (event.metadata?.model_tag) step.model = event.metadata.model_tag;
+          if (event.metadata?.model_role) step.model_role = event.metadata.model_role;
+          if (event.metadata?.task_type) step.tool = event.metadata.task_type;
+        }
+      }
+      if (event.event_type === 'step') {
+        const step = rawSteps.find((s) => s.step_num === event.metadata?.step_num);
+        if (step) {
+          step.status = event.metadata?.error ? 'failed' : 'done';
+          if (event.metadata?.model) step.model = event.metadata.model;
+          if (event.metadata?.model_role) step.model_role = event.metadata.model_role;
+        }
+      }
     }
 
     const finished = after.some((e) => e.event_type === 'complete' || e.event_type === 'error');
@@ -210,7 +223,8 @@ export default function NewTaskScreen({
       statusText = `Self-correcting after an error (revision ${revisions})…`;
     } else if (activeIndex !== -1 && activeIndex < rawSteps.length) {
       const cur = rawSteps[activeIndex];
-      statusText = `Step ${activeIndex + 1}/${rawSteps.length}: Running ${cur.tool}…`;
+      const modelHint = cur.model ? ` · ${cur.model}` : '';
+      statusText = `Step ${activeIndex + 1}/${rawSteps.length}: Running ${cur.tool}${modelHint}…`;
     } else if (finished) {
       statusText = 'Finalizing output…';
     } else if (rawSteps.some((s) => s.status !== 'pending')) {
@@ -218,10 +232,18 @@ export default function NewTaskScreen({
     }
 
     let modelMeta = '';
-    const route = events.find((e) => e.event_type === 'route');
-    if (route) {
-      const role = route.metadata?.model_role;
-      modelMeta = `${role || 'Model'} · ${route.metadata?.model_tag || ''}`;
+    const distinctModels = Array.from(
+      new Set(
+        after
+          .filter((e) => e.event_type === 'route' || e.event_type === 'step')
+          .map((e) => e.metadata?.model_tag || e.metadata?.model)
+          .filter((m) => m && !m.endsWith('_tool') && m !== 'vault_search')
+      )
+    );
+    if (distinctModels.length > 1) {
+      modelMeta = `Models · ${distinctModels.join(' → ')}`;
+    } else if (distinctModels.length === 1) {
+      modelMeta = `Model · ${distinctModels[0]}`;
     }
 
     setMessages((prev) =>
@@ -238,6 +260,7 @@ export default function NewTaskScreen({
       })
     );
   }, []);
+
 
   // Run Task Execution with Optimistic UI Updates
   const runTask = async (promptOverride = null) => {
@@ -297,122 +320,242 @@ export default function NewTaskScreen({
       );
     }, 1000);
 
-    // Audit poll for live progress
-    pollTimerRef.current = setInterval(async () => {
+    const streamUrl = `/run/stream?task=${encodeURIComponent(fullTask)}&task_id=${encodeURIComponent(taskId)}${activeChatId ? `&chat_id=${encodeURIComponent(activeChatId)}` : ''}${attachedFile ? `&attachment_type=file` : ''}`;
+    const eventSource = new EventSource(streamUrl);
+
+    eventSource.addEventListener('plan', (e) => {
       try {
-        const res = await fetch(`/audit?task_id=${encodeURIComponent(taskId)}`);
-        if (res.ok) {
-          const data = await res.json();
-          applyAuditEvents(data.events || [], tempAsstId);
-        }
-      } catch {
-        // ignore poll error
-      }
-    }, 1000);
+        const d = JSON.parse(e.data);
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === tempAsstId
+              ? {
+                  ...m,
+                  steps: d.steps || [],
+                  statusText: `Plan established: ${d.step_count} step(s)…`,
+                  modelMeta: d.model ? `Planner · ${d.model}` : m.modelMeta,
+                }
+              : m
+          )
+        );
+      } catch {}
+    });
 
-    try {
-      const response = await fetch('/run', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
-          task: fullTask,
-          task_id: taskId,
-          chat_id: activeChatId || undefined,
-          history: priorHistory,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`${response.status} ${response.statusText}`);
-      }
-
-      const data = await response.json();
-
-      clearInterval(pollTimerRef.current);
-      clearInterval(tickerRef.current);
-
-      // If backend auto-created a new chat, update lastLoadedChatIdRef first to avoid clearing!
-      if (data.chat_id && data.chat_id !== activeChatId) {
-        lastLoadedChatIdRef.current = data.chat_id;
-        setActiveChatId(data.chat_id);
-      }
-      if (onChatsUpdated) {
-        onChatsUpdated();
-      }
-
-      // Final audit sync
+    eventSource.addEventListener('step_start', (e) => {
       try {
-        const auditRes = await fetch(`/audit?task_id=${encodeURIComponent(taskId)}`);
-        if (auditRes.ok) {
-          const auditData = await auditRes.json();
-          applyAuditEvents(auditData.events || [], tempAsstId);
-        }
-      } catch {
-        // ignore
-      }
-
-      // Finalize assistant message with full rich payload
-
-      setMessages((prev) =>
-        prev.map((msg) => {
-          if (msg.id === tempAsstId) {
+        const d = JSON.parse(e.data);
+        setMessages((prev) =>
+          prev.map((m) => {
+            if (m.id !== tempAsstId) return m;
+            const updatedSteps = (m.steps || []).map((s) =>
+              s.step_num === d.step_num ? { ...s, status: 'executing', model: d.model, tool: d.tool } : s
+            );
             return {
-              ...msg,
-              is_streaming: false,
-              content: data.result || '',
-              result: data.result || '',
-              status: data.status,
-              steps: data.steps || data.plan || msg.steps || [],
-              step_outputs: data.step_outputs || [],
-              sources: data.sources || [],
-              generated_files: data.generated_files || [],
-              code_runs: data.code_runs || [],
-              approval: data.approval || null,
-              draft_content: data.draft_content || null,
-              modelMeta: data.model_used ? `Model · ${data.model_used}` : msg.modelMeta,
-              meta: {
-                task_id: taskId,
+              ...m,
+              steps: updatedSteps,
+              statusText: `Step ${d.step_num}/${d.total_steps}: Executing [${d.tool}] with ${d.model}…`,
+            };
+          })
+        );
+      } catch {}
+    });
+
+    eventSource.addEventListener('tool_done', (e) => {
+      try {
+        const d = JSON.parse(e.data);
+        setMessages((prev) =>
+          prev.map((m) => {
+            if (m.id !== tempAsstId) return m;
+            const updatedSteps = (m.steps || []).map((s) =>
+              s.step_num === d.step_num ? { ...s, status: d.error ? 'failed' : 'done' } : s
+            );
+            return {
+              ...m,
+              steps: updatedSteps,
+              key_facts: d.key_facts || m.key_facts,
+            };
+          })
+        );
+      } catch {}
+    });
+
+    eventSource.addEventListener('observe', (e) => {
+      try {
+        const d = JSON.parse(e.data);
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === tempAsstId
+              ? {
+                  ...m,
+                  statusText: `Observe: ${d.action.toUpperCase()} — ${d.reasoning}`,
+                }
+              : m
+          )
+        );
+      } catch {}
+    });
+
+    eventSource.addEventListener('replan', (e) => {
+      try {
+        const d = JSON.parse(e.data);
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === tempAsstId
+              ? {
+                  ...m,
+                  steps: d.plan || m.steps,
+                  statusText: `Dynamic Replan #${d.replan_count}: ${d.reasoning}`,
+                }
+              : m
+          )
+        );
+      } catch {}
+    });
+
+    eventSource.addEventListener('clarify', (e) => {
+      try {
+        const d = JSON.parse(e.data);
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === tempAsstId
+              ? {
+                  ...m,
+                  clarify_question: d.question,
+                  statusText: 'Awaiting your clarification…',
+                }
+              : m
+          )
+        );
+      } catch {}
+    });
+
+    eventSource.addEventListener('done_stream', (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        eventSource.close();
+        clearInterval(tickerRef.current);
+
+        if (data.chat_id && data.chat_id !== activeChatId) {
+          lastLoadedChatIdRef.current = data.chat_id;
+          setActiveChatId(data.chat_id);
+        }
+        if (onChatsUpdated) onChatsUpdated();
+
+        setMessages((prev) =>
+          prev.map((msg) => {
+            if (msg.id === tempAsstId) {
+              return {
+                ...msg,
+                is_streaming: false,
+                content: data.result || '',
+                result: data.result || '',
                 status: data.status,
-                steps: data.steps || data.plan || [],
+                clarify_question: data.clarify_question,
+                key_facts: data.key_facts,
+                steps: data.steps || data.plan || msg.steps || [],
                 step_outputs: data.step_outputs || [],
                 sources: data.sources || [],
                 generated_files: data.generated_files || [],
                 code_runs: data.code_runs || [],
                 approval: data.approval || null,
                 draft_content: data.draft_content || null,
-                model_used: data.model_used,
-                routing_decision: data.routing_decision,
-              },
-            };
-          }
-          return msg;
-        })
-      );
-    } catch (err) {
-      clearInterval(pollTimerRef.current);
-      clearInterval(tickerRef.current);
+                trace: data.trace || [],
+                modelMeta:
+                  data.models_used && data.models_used.length > 1
+                    ? `Models · ${data.models_used.join(' → ')}`
+                    : data.model_used
+                    ? `Model · ${data.model_used}`
+                    : msg.modelMeta,
+                meta: {
+                  task_id: taskId,
+                  status: data.status,
+                  steps: data.steps || data.plan || [],
+                  step_outputs: data.step_outputs || [],
+                  sources: data.sources || [],
+                  generated_files: data.generated_files || [],
+                  code_runs: data.code_runs || [],
+                  approval: data.approval || null,
+                  draft_content: data.draft_content || null,
+                  model_used: data.model_used,
+                  models_used: data.models_used || (data.model_used ? [data.model_used] : []),
+                  routing_decision: data.routing_decision,
+                  clarify_question: data.clarify_question,
+                  key_facts: data.key_facts,
+                },
+              };
+            }
+            return msg;
+          })
+        );
+      } catch (err) {
+        console.error('Error handling done_stream', err);
+      } finally {
+        setRunning(false);
+        setIsThinking(false);
+        setAttachedFile(null);
+      }
+    });
 
-      setMessages((prev) =>
-        prev.map((msg) => {
-          if (msg.id === tempAsstId) {
-            return {
-              ...msg,
-              is_streaming: false,
-              is_error: true,
-              errorMsg: `Task execution failed: ${err.message}`,
-              retryPrompt: fullTask,
-            };
-          }
-          return msg;
-        })
-      );
-    } finally {
-      clearInterval(pollTimerRef.current);
+    eventSource.addEventListener('error', (e) => {
+      eventSource.close();
       clearInterval(tickerRef.current);
       setRunning(false);
       setIsThinking(false);
-      setAttachedFile(null);
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === tempAsstId
+            ? {
+                ...msg,
+                is_streaming: false,
+                is_error: true,
+                errorMsg: 'Streaming connection interrupted.',
+                retryPrompt: fullTask,
+              }
+            : msg
+        )
+      );
+    });
+  };
+
+  const handleClarifyReply = async (taskId, replyText) => {
+    if (!replyText.trim()) return;
+    setRunning(true);
+    try {
+      const res = await fetch(`/run/${encodeURIComponent(taskId)}/reply`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ reply: replyText, chat_id: activeChatId || undefined }),
+      });
+      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+      const data = await res.json();
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.task_id === taskId || m.meta?.task_id === taskId
+            ? {
+                ...m,
+                content: data.result || m.content,
+                result: data.result || m.result,
+                status: data.status,
+                clarify_question: null,
+                steps: data.steps || data.plan || m.steps,
+                trace: data.trace || m.trace,
+                meta: {
+                  ...m.meta,
+                  clarify_question: null,
+                  status: data.status,
+                  steps: data.steps || data.plan || [],
+                  step_outputs: data.step_outputs || [],
+                  key_facts: data.key_facts || {},
+                },
+              }
+            : m
+        )
+      );
+    } catch (err) {
+      alert(`Failed to send clarification: ${err.message}`);
+    } finally {
+      setRunning(false);
     }
   };
 
@@ -554,6 +697,7 @@ export default function NewTaskScreen({
                 user={user}
                 onApprovalAction={handleApprovalAction}
                 onApprovalEditSubmit={handleApprovalEditSubmit}
+                onClarifyReply={handleClarifyReply}
                 onRetry={(prompt) => runTask(prompt)}
               />
             ))}

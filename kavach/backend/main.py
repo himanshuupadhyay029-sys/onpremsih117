@@ -18,18 +18,20 @@ from typing import Any, Dict, List, Optional, Union
 import uuid
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from backend import config
+from backend.engine import registry, ollama
 from backend.audit.logbook import log_event, read_events
 from backend.auth.routes import router as auth_router, get_optional_user
 from backend.brain.agent import run_agent
+from backend.brain.event_bus import emit_sync, register_task, unregister_task
 from backend.chat.routes import router as chat_router
-from backend.db.models import Chat, Message, User
-from backend.db.session import get_db
+from backend.db.models import AgentRun, Chat, Message, User
+from backend.db.session import get_db, SessionLocal
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from backend.guard.approve import get_approval, resolve_approval
@@ -128,7 +130,6 @@ def run(
     chat_id = req.chat_id
 
     if current_user:
-        # Check if chat exists and belongs to this user
         if chat_id:
             try:
                 c_uuid = uuid.UUID(chat_id)
@@ -136,9 +137,7 @@ def run(
             except Exception:
                 chat = None
 
-        # Auto-create if no chat or invalid chat_id provided (BEFORE running the agent)
         if not chat:
-            # Generate clean title from prompt
             clean_title = req.task.strip().split("\n")[0]
             if len(clean_title) > 40:
                 clean_title = clean_title[:37] + "..."
@@ -151,7 +150,6 @@ def run(
             db.commit()
             db.refresh(chat)
 
-        # Persist user message immediately before running agent
         try:
             user_msg = Message(
                 id=uuid.uuid4(),
@@ -166,8 +164,8 @@ def run(
         except Exception as exc:
             print(f"[ERROR] Failed to persist user message: {exc}", flush=True)
 
-    # Fetch prior history for multi-turn context (excluding the user message we just saved)
     history = []
+    initial_key_facts = {}
     if chat:
         try:
             if user_msg:
@@ -185,22 +183,31 @@ def run(
                     .all()
                 )
             history = [{"role": m.role, "content": m.content} for m in db_msgs]
+            if chat.agent_memory:
+                initial_key_facts = dict(chat.agent_memory)
         except Exception as exc:
             print(f"[WARN] Failed to load history: {exc}", flush=True)
 
     if not history and req.history:
         history = req.history
 
-
     agent_res = run_agent(
         req.task,
         attachment_type=req.attachment_type,
         task_id=req.task_id,
         history=history,
+        initial_key_facts=initial_key_facts,
     )
 
     if chat:
         try:
+            # Merge updated agent memory
+            new_facts = agent_res.get("key_facts") or {}
+            if new_facts:
+                merged_mem = dict(chat.agent_memory or {})
+                merged_mem.update(new_facts)
+                chat.agent_memory = merged_mem
+
             asst_msg = Message(
                 id=uuid.uuid4(),
                 chat_id=chat.id,
@@ -218,12 +225,31 @@ def run(
                     "approval": agent_res.get("approval"),
                     "draft_content": agent_res.get("draft_content"),
                     "model_used": agent_res.get("model_used"),
+                    "models_used": agent_res.get("models_used", []),
                     "routing_decision": agent_res.get("routing_decision"),
+                    "clarify_question": agent_res.get("clarify_question"),
+                    "key_facts": agent_res.get("key_facts"),
                 },
             )
             db.add(asst_msg)
 
-            # Auto-titling if chat title was still generic "New Chat"
+            # Persist AgentRun for state snapshot and resume
+            task_id_str = agent_res.get("task_id") or req.task_id or str(uuid.uuid4())
+            agent_run = db.query(AgentRun).filter(AgentRun.task_id == task_id_str).first()
+            if not agent_run:
+                agent_run = AgentRun(
+                    id=uuid.uuid4(),
+                    chat_id=chat.id,
+                    task_id=task_id_str,
+                    status=agent_res.get("status", "complete"),
+                    state_snapshot=agent_res.get("state_snapshot", {}),
+                )
+                db.add(agent_run)
+            else:
+                agent_run.status = agent_res.get("status", "complete")
+                agent_run.state_snapshot = agent_res.get("state_snapshot", {})
+                agent_run.updated_at = func.now()
+
             if chat.title == "New Chat":
                 clean_title = req.task.strip().split("\n")[0]
                 if len(clean_title) > 40:
@@ -233,9 +259,8 @@ def run(
             chat.updated_at = func.now()
             db.commit()
         except Exception as exc:
-            print(f"[ERROR] Failed to persist assistant message: {exc}", flush=True)
+            print(f"[ERROR] Failed to persist assistant message & run: {exc}", flush=True)
 
-    # Attach chat_id and chat_title to return payload
     if chat:
         agent_res["chat_id"] = str(chat.id)
         agent_res["chat_title"] = chat.title
@@ -246,16 +271,331 @@ def run(
     return agent_res
 
 
+@app.get("/run/stream")
+async def run_stream(
+    task: str,
+    task_id: Optional[str] = None,
+    chat_id: Optional[str] = None,
+    attachment_type: Optional[str] = None,
+    current_user: Optional[User] = Depends(get_optional_user),
+    db: Session = Depends(get_db),
+):
+    """Real-time SSE streaming endpoint for KAVACH autonomous agent execution."""
+    if not task_id:
+        task_id = str(uuid.uuid4())
+
+    loop = asyncio.get_running_loop()
+    queue = register_task(task_id, loop)
+
+    chat = None
+    if current_user:
+        if chat_id:
+            try:
+                c_uuid = uuid.UUID(chat_id)
+                chat = db.query(Chat).filter(Chat.id == c_uuid, Chat.user_id == current_user.id).first()
+            except Exception:
+                chat = None
+        if not chat:
+            clean_title = task.strip().split("\n")[0]
+            if len(clean_title) > 40:
+                clean_title = clean_title[:37] + "..."
+            chat = Chat(user_id=current_user.id, title=clean_title or "New Chat", chat_type="general")
+            db.add(chat)
+            db.commit()
+            db.refresh(chat)
+
+        try:
+            user_msg = Message(
+                id=uuid.uuid4(),
+                chat_id=chat.id,
+                role="user",
+                content=task,
+                meta={"attachment_type": attachment_type, "task_id": task_id},
+            )
+            db.add(user_msg)
+            chat.updated_at = func.now()
+            db.commit()
+        except Exception as exc:
+            print(f"[ERROR] Failed to persist user msg in stream: {exc}", flush=True)
+
+    history = []
+    initial_key_facts = {}
+    if chat:
+        try:
+            db_msgs = db.query(Message).filter(Message.chat_id == chat.id).order_by(Message.created_at.asc()).all()
+            history = [{"role": m.role, "content": m.content} for m in db_msgs[:-1]]
+            if chat.agent_memory:
+                initial_key_facts = dict(chat.agent_memory)
+        except Exception as exc:
+            print(f"[WARN] Failed to load history in stream: {exc}", flush=True)
+
+    chat_db_id = str(chat.id) if chat else None
+    chat_db_title = chat.title if chat else None
+
+    def _execute_worker():
+        worker_db = SessionLocal()
+        try:
+            res = run_agent(
+                task,
+                attachment_type=attachment_type,
+                task_id=task_id,
+                history=history,
+                initial_key_facts=initial_key_facts,
+            )
+            if chat_db_id:
+                try:
+                    c = worker_db.query(Chat).filter(Chat.id == uuid.UUID(chat_db_id)).first()
+                    if c:
+                        new_facts = res.get("key_facts") or {}
+                        if new_facts:
+                            merged_mem = dict(c.agent_memory or {})
+                            merged_mem.update(new_facts)
+                            c.agent_memory = merged_mem
+
+                        asst_msg = Message(
+                            id=uuid.uuid4(),
+                            chat_id=c.id,
+                            role="assistant",
+                            content=res.get("result", "") or "",
+                            meta={
+                                "task_id": res.get("task_id"),
+                                "status": res.get("status"),
+                                "trace": res.get("trace", []),
+                                "steps": res.get("steps", res.get("plan", [])),
+                                "step_outputs": res.get("step_outputs", []),
+                                "sources": res.get("sources", []),
+                                "generated_files": res.get("generated_files", []),
+                                "code_runs": res.get("code_runs", []),
+                                "approval": res.get("approval"),
+                                "draft_content": res.get("draft_content"),
+                                "model_used": res.get("model_used"),
+                                "models_used": res.get("models_used", []),
+                                "routing_decision": res.get("routing_decision"),
+                                "clarify_question": res.get("clarify_question"),
+                                "key_facts": res.get("key_facts"),
+                            },
+                        )
+                        worker_db.add(asst_msg)
+
+                        ar = worker_db.query(AgentRun).filter(AgentRun.task_id == task_id).first()
+                        if not ar:
+                            ar = AgentRun(
+                                id=uuid.uuid4(),
+                                chat_id=c.id,
+                                task_id=task_id,
+                                status=res.get("status", "complete"),
+                                state_snapshot=res.get("state_snapshot", {}),
+                            )
+                            worker_db.add(ar)
+                        else:
+                            ar.status = res.get("status", "complete")
+                            ar.state_snapshot = res.get("state_snapshot", {})
+                            ar.updated_at = func.now()
+
+                        c.updated_at = func.now()
+                        worker_db.commit()
+                except Exception as exc:
+                    print(f"[ERROR] Worker failed DB persist: {exc}", flush=True)
+
+            res["chat_id"] = chat_db_id
+            res["chat_title"] = chat_db_title
+            emit_sync(task_id, "done_stream", res)
+        except Exception as exc:
+            emit_sync(task_id, "error", {"error": str(exc)})
+        finally:
+            worker_db.close()
+
+    loop.run_in_executor(None, _execute_worker)
+
+    async def sse_generator():
+        try:
+            while True:
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=90.0)
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"
+                    continue
+
+                event_name = event.get("event", "message")
+                event_data = event.get("data", {})
+                yield f"event: {event_name}\ndata: {json.dumps(event_data)}\n\n"
+
+                if event_name in ("done_stream", "error"):
+                    break
+        finally:
+            unregister_task(task_id)
+
+    return StreamingResponse(
+        sse_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+class ReplyRequest(BaseModel):
+    reply: str
+    chat_id: Optional[str] = None
+
+
+@app.post("/run/{task_id}/reply")
+def reply_to_agent(
+    task_id: str,
+    req: ReplyRequest,
+    current_user: Optional[User] = Depends(get_optional_user),
+    db: Session = Depends(get_db),
+):
+    """Resumes a paused agent run after user clarification or operator feedback."""
+    agent_run = db.query(AgentRun).filter(AgentRun.task_id == task_id).first()
+    if not agent_run:
+        raise HTTPException(status_code=404, detail="Agent run not found")
+
+    snapshot = dict(agent_run.state_snapshot or {})
+    if not snapshot:
+        raise HTTPException(status_code=400, detail="No resume snapshot available for this run")
+
+    curr_idx = snapshot.get("current_step", 0)
+    if snapshot.get("plan") and curr_idx < len(snapshot["plan"]):
+        orig_inp = snapshot["plan"][curr_idx]["input"]
+        snapshot["plan"][curr_idx]["input"] = f"{orig_inp}\n\n[Operator Feedback/Clarification]: {req.reply}"
+
+    snapshot["status"] = "executing"
+    snapshot["clarify_question"] = None
+
+    res = run_agent(
+        task="",
+        task_id=task_id,
+        resume_state=snapshot,
+    )
+
+    agent_run.status = res.get("status", "complete")
+    agent_run.state_snapshot = res.get("state_snapshot", {})
+    agent_run.updated_at = func.now()
+
+    if agent_run.chat_id:
+        chat = db.query(Chat).filter(Chat.id == agent_run.chat_id).first()
+        if chat:
+            asst_msg = Message(
+                id=uuid.uuid4(),
+                chat_id=chat.id,
+                role="assistant",
+                content=res.get("result", "") or "",
+                meta={
+                    "task_id": res.get("task_id"),
+                    "status": res.get("status"),
+                    "trace": res.get("trace", []),
+                    "steps": res.get("steps", res.get("plan", [])),
+                    "step_outputs": res.get("step_outputs", []),
+                    "sources": res.get("sources", []),
+                    "generated_files": res.get("generated_files", []),
+                    "code_runs": res.get("code_runs", []),
+                    "model_used": res.get("model_used"),
+                    "models_used": res.get("models_used", []),
+                    "routing_decision": res.get("routing_decision"),
+                    "key_facts": res.get("key_facts"),
+                },
+            )
+            db.add(asst_msg)
+            chat.updated_at = func.now()
+
+    db.commit()
+    return res
+
+
+
 
 @app.get("/models")
 def models():
     reg = registry.load_registry()
     try:
         installed = ollama.list_models()
-    except ollama.OllamaError as exc:
+    except Exception as exc:
         installed = []
         return {"registry": reg, "installed": installed, "warning": str(exc)}
     return {"registry": reg, "installed": installed}
+
+
+class ModelAssignRequest(BaseModel):
+    role: str
+    model: str
+
+@app.post("/models/assign")
+def assign_model(req: ModelAssignRequest):
+    try:
+        new_reg = registry.set_model(req.role, req.model)
+        return {"success": True, "registry": new_reg}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+class ModelPullRequest(BaseModel):
+    model: str
+
+class ModelCancelRequest(BaseModel):
+    model: str
+
+@app.get("/models/info")
+def get_model_info_endpoint(model: str):
+    """Returns availability and all available tags/quantizations for a given model from Ollama library."""
+    return ollama.get_model_tags_and_quants(model)
+
+@app.get("/models/pull/stream")
+async def pull_model_stream_endpoint(model: str):
+    """Streams pull progress directly from Ollama as Server-Sent Events (SSE)."""
+    return StreamingResponse(
+        ollama.stream_pull_model(model),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        }
+    )
+
+@app.post("/models/pull/cancel")
+async def cancel_model_pull_endpoint(req: ModelCancelRequest):
+    """Cancels an ongoing model pull immediately."""
+    cancelled = await ollama.cancel_pull_model(req.model)
+    return {"success": True, "cancelled": cancelled, "model": req.model}
+
+@app.post("/models/pull")
+def pull_model_endpoint(req: ModelPullRequest):
+    try:
+        ollama.pull_model(req.model)
+        return {"success": True, "message": f"Successfully pulled {req.model}"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/models/{model_name:path}")
+def delete_model_endpoint(model_name: str):
+    try:
+        ollama.delete_model(model_name)
+        return {"success": True, "message": f"Successfully deleted {model_name}"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class CodeExecuteRequest(BaseModel):
+    code: str
+    language: Optional[str] = "python"
+    stdin: Optional[str] = None
+    task_id: Optional[str] = None
+
+@app.post("/code/run")
+def run_code_endpoint(req: CodeExecuteRequest):
+    """Executes code in the network-isolated Docker sandbox with optional interactive stdin."""
+    try:
+        from backend.tools import sandbox
+        return sandbox.run_code(
+            code=req.code,
+            language=req.language or "python",
+            user_stdin=req.stdin,
+            task_id=req.task_id,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/audit")

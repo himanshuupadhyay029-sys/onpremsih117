@@ -83,6 +83,18 @@ export default function Sidebar({
           </svg>
           <span>Audit Log</span>
         </button>
+
+        <button
+          className={`nav-item ${activeScreen === 'models' ? 'is-active' : ''}`}
+          onClick={() => onSelectScreen('models')}
+        >
+          <svg className="icon" viewBox="0 0 24 24">
+            <path d="M12 2L2 7l10 5 10-5-10-5z" />
+            <path d="M2 17l10 5 10-5" />
+            <path d="M2 12l10 5 10-5" />
+          </svg>
+          <span>Model Settings</span>
+        </button>
       </nav>
 
       {/* Chat History List (visible when on 'task' screen and user is logged in) */}

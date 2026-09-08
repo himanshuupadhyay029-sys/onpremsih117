@@ -569,7 +569,15 @@ a:hover { color: var(--kavach-accent-hover); text-decoration: underline; }
 .step.is-running .step-marker {
   border-color: var(--kavach-accent);
 }
-.step-body { flex: 1; }
+.step-body { flex: 1; min-width: 0; }
+.step-tool-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 2px;
+}
 .step-tool {
   font-size: 11px;
   text-transform: uppercase;
@@ -577,10 +585,31 @@ a:hover { color: var(--kavach-accent-hover); text-decoration: underline; }
   font-weight: 600;
   color: var(--text-tertiary);
 }
+.step-model-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-family: var(--font-mono, monospace);
+  font-weight: 500;
+  padding: 1.5px 7px;
+  border-radius: 5px;
+  background: rgba(99, 102, 241, 0.12);
+  border: 1px solid rgba(99, 102, 241, 0.28);
+  color: #a5b4fc;
+  letter-spacing: 0.01em;
+}
+.step-model-tag .icon {
+  width: 12px;
+  height: 12px;
+  opacity: 0.85;
+  color: #818cf8;
+}
 .step-input {
   color: var(--text-primary);
   margin-top: 1px;
 }
+
 
 /* ------------------------------------------------------------- cards --- */
 
@@ -764,6 +793,236 @@ a:hover { color: var(--kavach-accent-hover); text-decoration: underline; }
 }
 .code-stdout { color: var(--text-primary); }
 .code-stderr { color: var(--status-alert); margin-top: 6px; }
+
+/* ------------------------------------------- interactive code enhancements --- */
+
+.interactive-code-card {
+  transition: border-color var(--ease);
+}
+
+.code-header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.code-meta-badge.is-success {
+  color: var(--status-safe);
+}
+
+.revision-pill {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--kavach-accent-hover);
+  background: var(--kavach-accent-muted);
+  padding: 2px 7px;
+  border-radius: 4px;
+}
+
+.code-revision-tabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 6px 10px;
+  background: var(--bg-page);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin-top: -4px;
+}
+
+.revision-tabs-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  margin-right: 4px;
+}
+
+.rev-tab-btn {
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--ease);
+}
+
+.rev-tab-btn:hover {
+  background: var(--bg-card);
+  color: var(--text-primary);
+}
+
+.rev-tab-btn.active {
+  background: var(--kavach-accent);
+  border-color: var(--kavach-accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+.rev-tab-btn.had-error {
+  border-color: rgba(239, 68, 68, 0.4);
+}
+
+.code-actions-bar {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  z-index: 2;
+}
+
+.code-action-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #D4D4D8;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--ease);
+}
+
+.code-action-btn:hover {
+  background: rgba(255, 255, 255, 0.18);
+  color: #FFFFFF;
+}
+
+.code-editor-textarea {
+  width: 100%;
+  background: transparent;
+  color: #E4E4E7;
+  font-family: "SF Mono", Monaco, Menlo, Consolas, "Courier New", monospace;
+  font-size: 12.5px;
+  line-height: 1.55;
+  border: none;
+  outline: none;
+  resize: vertical;
+  padding: 0;
+  margin: 0;
+}
+
+.code-interactive-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding-top: 4px;
+}
+
+.btn-toggle-stdin {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  background: transparent;
+  border: 1px dashed var(--border);
+  color: var(--text-secondary);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all var(--ease);
+}
+
+.btn-toggle-stdin:hover, .btn-toggle-stdin.active {
+  background: var(--kavach-accent-muted);
+  border-color: var(--kavach-accent);
+  color: var(--kavach-accent-hover);
+}
+
+.btn-run-sandbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  font-size: 12.5px;
+  font-weight: 600;
+  background: #10B981;
+  color: #FFFFFF;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(16, 185, 129, 0.3);
+  transition: all var(--ease);
+}
+
+.btn-run-sandbox:hover:not(:disabled) {
+  background: #059669;
+  transform: translateY(-1px);
+}
+
+.btn-run-sandbox:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.stdin-drawer {
+  background: var(--bg-page);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.stdin-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-tertiary);
+}
+
+.stdin-textarea {
+  width: 100%;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text-primary);
+  font-family: "SF Mono", Monaco, Menlo, Consolas, "Courier New", monospace;
+  font-size: 12px;
+  padding: 6px 8px;
+  outline: none;
+  resize: vertical;
+}
+
+.stdin-textarea:focus {
+  border-color: var(--kavach-accent);
+}
+
+.code-output-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.output-time-tag {
+  font-size: 11px;
+  font-family: monospace;
+  color: var(--text-tertiary);
+}
+
+.spinner-micro {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: #ffffff;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
 
 /* ---------------------------------------------------- approval gate --- */
 

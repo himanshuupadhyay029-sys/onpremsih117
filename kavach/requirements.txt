@@ -97,3 +97,9 @@ websockets==16.1.1
 xxhash==4.0.1
 yarl==1.24.5
 zstandard==0.25.0
+alembic==1.19.2
+SQLAlchemy==2.0.52
+psycopg2-binary==2.9.12
+bcrypt==5.0.0
+python-jose==3.5.0
+

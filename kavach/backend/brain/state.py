@@ -32,6 +32,18 @@ class StepOutput(TypedDict):
     sources: NotRequired[List[Dict[str, str]]]  # populated by the real 'search' tool (Phase 4)
 
 
+class ToolResult(TypedDict):
+    step_num: int
+    tool: str
+    success: bool
+    raw_output: str
+    key_facts: Dict[str, Any]
+    sources: NotRequired[Optional[List[Dict[str, Any]]]]
+    file_path: NotRequired[Optional[str]]
+    error_message: NotRequired[Optional[str]]
+    duration_seconds: NotRequired[float]
+
+
 class TraceEntry(TypedDict):
     role: str  # thought | action | observation
     content: str
@@ -49,8 +61,15 @@ class AgentState(TypedDict):
     messages: Annotated[List[Dict[str, str]], operator.add]
     trace: Annotated[List[TraceEntry], operator.add]
 
-    status: str  # planning | executing | revising | complete | failed
+    status: str  # planning | executing | revising | replan | clarifying | complete | failed | awaiting_approval
     revise_count: int
+    replan_count: NotRequired[int]
     final_answer: Optional[str]
     history_context: Optional[str]
+    shared_memory: str
+    attachment_type: Optional[str]
+
+    observe_decision: NotRequired[Optional[Dict[str, Any]]]
+    clarify_question: NotRequired[Optional[str]]
+    key_facts: NotRequired[Dict[str, Any]]
 

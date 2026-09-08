@@ -11,18 +11,21 @@ Phase 8: Deterministic engineering math calculator (calc.py) showing real arithm
 Phase 11: Human approval gate for high-stakes document outputs (approve.py).
 """
 
+from datetime import datetime
 import json
 import logging
 from pathlib import Path
 import re
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 import uuid
 
 from langgraph.graph import END, StateGraph
 
 from backend.audit.logbook import log_event
+from backend.brain.event_bus import emit_sync
 from backend.brain.router import route
 from backend.brain.state import AgentState
+from backend.brain.tools_dispatch import dispatch_tool
 from backend.engine import ollama, registry
 from backend.guard.approve import assess_risk, request_approval
 from backend.tools.calc import calculate as calc_tool
@@ -36,39 +39,150 @@ logger = logging.getLogger("kavach.agent")
 if not logger.handlers:
     logging.basicConfig(level=logging.INFO)
 
-MAX_TOTAL_STEPS = 5
+
+def _log_terminal(category: str, msg: str) -> None:
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    out = f"[{now_str}] [{category}] {msg}"
+    try:
+        print(out, flush=True)
+    except UnicodeEncodeError:
+        safe_out = out.encode("ascii", errors="replace").decode("ascii")
+        print(safe_out, flush=True)
+
+
+
+MAX_TOTAL_STEPS = 8
 MAX_REVISIONS = 2
 ERROR_TRIGGER = "simulate_error"
 CODE_TIMEOUT_SECONDS = 15
-MAX_HISTORY_TURNS = 8
-MAX_HISTORY_CHARS_PER_MSG = 400
+MAX_HISTORY_TURNS = 12
+MAX_HISTORY_CHARS_PER_MSG = 1200
+
 
 VALID_TOOLS = {"llm", "search", "calc", "vision", "document", "code", "ocr"}
 
-PLAN_PROMPT_TEMPLATE = """You are the planning module of an AI agent. Break the task below into the MINIMUM number of ordered steps required to complete it.
+MASTER_PLAN_PROMPT_TEMPLATE = """You are the master task planner for KAVACH, an autonomous on-premises industrial operations assistant.
+Break down the user's request into the minimum necessary number of ordered sub-tasks (1 to 8 steps).
 
-CRITICAL EFFICIENCY RULE:
-Use the fewest steps possible. Do not create more than 3 steps unless the task genuinely requires multiple distinct tool calls (e.g. search AND then draft). A simple question or search needs 1 step, not 6. Do NOT create redundant "llm" steps.
+CRITICAL RULES:
+1. MINIMALITY: If the request is a single action, simple question, search, code request, or calculation, output EXACTLY 1 step.
+2. COMPOUND & MULTIMODAL REQUESTS: If the user's request combines multiple distinct capabilities:
+   - Multimodal Compound: If an image is attached or referenced AND the user asks to write code, do a calculation, write a document, or generate creative writing/poems, you MUST separate them into multiple distinct steps!
+     Step 1 'vision' to inspect and describe the image.
+     Step 2 'llm' to write the poem or analysis based on the image description.
+     Step 3 'code' to generate and execute the requested Python script in the Docker sandbox.
+     CRITICAL: NEVER put coding, calculations, poems, or document drafting into a 'vision' step! The 'vision' tool CAN ONLY inspect and describe images.
+   - Code + Document: Step 1 'code' to run script in sandbox, Step 2 'document' to create Word report.
+   - Search + Calc / Code: Step 1 'search', Step 2 'calc' or 'code'.
+3. ATOMIC TOOL STEPS: Never split the execution of a single capability into multiple steps (e.g. do NOT create separate 'write code', 'run code', 'verify code' steps — a coding task is ONE step with tool 'code').
+4. Each step must be a concrete, actionable sub-task with:
+   - "step_num": integer (1, 2, 3, ...)
+   - "tool": one of ["search", "calc", "code", "document", "ocr", "vision", "llm"]
+   - "input": clear specific instruction for that step
 
-Each step must be an object with:
-  "step": <integer, starting at 1>
-  "tool": one of ["llm", "search", "calc", "vision", "document", "code", "ocr"]
-  "input": a short instruction/query for that tool
+Capabilities:
+- "search": Look up SOPs, incident procedures, equipment specs, or thresholds in the Knowledge Vault.
+- "calc": Numerical arithmetic, formulas, remaining life, corrosion rates, or unit conversions.
+- "code": Generate and run Python/JS/C scripts in the secure Docker container sandbox.
+- "document": Draft formal corporate Word (.docx) documents, reports, or SOPs.
+- "ocr": Read and extract text from scanned images or inspection sheets.
+- "vision": Inspect diagrams, schematics, photos, or gauges.
+- "llm": Direct answering, general explanation, or conversational reasoning.
 
-Tool Selection Rules:
-- "search": for looking up SOPs, procedures, or facts in the Knowledge Vault. A search question needs ONLY 1 search step.
-- "document": for drafting formal Word document (.docx) reports. Typically step 1 is "search" (if SOP context is needed) and step 2 is "document".
-- "calc": for numerical math, formulas, or engineering calculations with step-by-step arithmetic.
-- "code": for generating and running Python scripts in the secure sandbox.
-- "ocr": for reading text from image/scanned document files.
-- "vision": for analyzing engineering drawings, diagrams, or gauges.
-- "llm": ONLY for general reasoning or direct questions where no specific tool is needed.
+Examples:
+Request: "Search the SOPs for who must be notified during a Severity 1 incident."
+Output:
+[
+  {{"step_num": 1, "tool": "search", "input": "Search the SOPs for who must be notified during a Severity 1 incident."}}
+]
 
-{history_section}Task: {task}
-Task type: {task_type}{failure_context}
+Request: "Write and run a python script that prints 'KAVACH_SANDBOX_ONLINE' and the value of 14 * 7"
+Output:
+[
+  {{"step_num": 1, "tool": "code", "input": "Write and run a python script that prints 'KAVACH_SANDBOX_ONLINE' and the value of 14 * 7"}}
+]
 
-Respond with ONLY a raw JSON array of step objects. Max 3 steps (unless revising). No prose, no markdown fences, no explanation.
+Request: "Write a python code for basic calculation like plus, minus, divide, and multiply to execute 50*10 and then create a document for this code"
+Output:
+[
+  {{"step_num": 1, "tool": "code", "input": "Write and execute python code to perform basic calculations and execute 50*10"}},
+  {{"step_num": 2, "tool": "document", "input": "Create a formal document documenting the calculation code and execution results"}}
+]
+
+Request: "Analyse this image, and then create a poem on it and then write a python code to print Dogs are most loyal animal"
+Output:
+[
+  {{"step_num": 1, "tool": "vision", "input": "Analyze the attached image in detail."}},
+  {{"step_num": 2, "tool": "llm", "input": "Create a poem inspired by the image analysis."}},
+  {{"step_num": 3, "tool": "code", "input": "Write and run a python script to print 'Dogs are most loyal animal'"}}
+]
+
+Request: "Draft an emergency containment procedure document for pipeline Bravo."
+Output:
+[
+  {{"step_num": 1, "tool": "document", "input": "Draft an emergency containment procedure document for pipeline Bravo."}}
+]
+
+Request: "Find the corrosion rate limit for Tank-4, then calculate remaining life if thickness is 8mm, and draft an inspection report"
+Output:
+[
+  {{"step_num": 1, "tool": "search", "input": "Search Knowledge Vault for Tank-4 corrosion rate limit"}},
+  {{"step_num": 2, "tool": "calc", "input": "Calculate remaining life of Tank-4 with thickness 8mm using retrieved corrosion rate"}},
+  {{"step_num": 3, "tool": "document", "input": "Draft formal inspection report on Tank-4 remaining lifespan"}}
+]
+
+{history_section}User Request: {task}
+{attachment_info}
+
+Respond with ONLY a raw JSON array of step objects. No markdown formatting, no other text:
 """
+
+
+OBSERVE_PROMPT_TEMPLATE = """You are the autonomous reasoning controller for KAVACH, an on-premises industrial operations assistant.
+Your job is to analyze the execution output of the sub-task step just completed, compare it against the overall user request, and decide the next action.
+
+Original User Task:
+{task}
+
+Master Plan:
+{plan_overview}
+
+Current Step #{step_num} of {total_steps} [{tool}]:
+Input: {step_input}
+Execution Status: {status_str}
+Execution Output:
+{output_preview}
+
+Accumulated Key Facts from Workflow:
+{key_facts_json}
+
+CRITICAL RULES FOR DECIDING ACTION:
+1. END-OF-PLAN CHECK: If this is Step #{step_num} of {total_steps} (the LAST step in the current plan):
+   - NEVER choose "continue"! ("continue" is only valid if another step already exists in the Master Plan).
+   - If ALL parts of the Original User Task have been satisfied, select "done".
+   - If ANY part of the Original User Task remains unfulfilled (such as writing code, running a script, writing a poem, drafting a document, or computing values), you MUST select "replan" and provide the uncompleted task(s) in "new_steps"!
+2. IF NOT THE LAST STEP: If the current step succeeded or made acceptable progress, choose "continue".
+3. IF STEP ENCOUNTERED AN ERROR: Choose "retry" and provide a refined instruction in "retry_instruction", or "replan" to change course.
+
+Available Actions:
+- "continue": The step succeeded and an existing next step is already in the Master Plan. Proceed to that step.
+- "replan": Unfulfilled user goals remain missing from the plan, or execution output revealed new requirements. Provide remaining steps in "new_steps".
+- "retry": The step encountered a fixable failure or error. Provide refined instruction in "retry_instruction".
+- "done": All parts of the user's request have been fully and completely answered or satisfied. End execution cleanly.
+- "clarify": Crucial ambiguity prevents completing the task, requiring user input. Provide the specific question in "clarify_question".
+
+Respond with ONLY a valid JSON object matching this schema. No markdown formatting, no other text:
+{{
+  "action": "continue" | "replan" | "retry" | "done" | "clarify",
+  "reasoning": "1-2 sentence justification for this decision",
+  "new_steps": [
+    {{"tool": "search|calc|code|document|ocr|vision|llm", "input": "concrete instruction"}}
+  ],
+  "retry_instruction": "refined instruction if retry",
+  "clarify_question": "question to ask user if clarify"
+}}
+"""
+
 
 
 def _format_history(history: Optional[List[dict]]) -> str:
@@ -113,15 +227,13 @@ def _normalize_tool(name: str) -> str:
     return "llm"
 
 
-def _parse_plan(
+def _parse_master_plan(
     raw: str,
-    fallback_input: str,
-    task_type: Optional[str] = None,
-    is_revision: bool = False,
+    original_task: str,
+    attachment_type: Optional[str] = None,
 ) -> List[dict]:
-    """Robustly parse the planner's JSON, enforcing minimum steps and soft ceilings."""
+    """Robustly parses the master planner's JSON output into ordered PlanSteps."""
     text = (raw or "").strip()
-
     fence_match = re.search(r"```(?:json)?\s*(\[.*?\])\s*```", text, re.DOTALL)
     if fence_match:
         text = fence_match.group(1)
@@ -130,62 +242,160 @@ def _parse_plan(
         if bracket_match:
             text = bracket_match.group(1)
 
-    # Soft ceiling: max 3 steps for document/search tasks unless revising
-    max_steps = 3 if (task_type in {"document", "search"} and not is_revision) else 6
-
     parsed_steps: List[dict] = []
     try:
-        parsed = json.loads(text)
-        if isinstance(parsed, list):
-            for item in parsed[:max_steps]:
-                if not isinstance(item, dict):
-                    continue
-                tool = _normalize_tool(item.get("tool", "llm"))
-                step_input = str(item.get("input", fallback_input))
-                parsed_steps.append({"tool": tool, "input": step_input})
-    except (json.JSONDecodeError, TypeError):
+        data = json.loads(text)
+        if isinstance(data, list):
+            for i, item in enumerate(data[:3]):
+                if isinstance(item, dict):
+                    tool = _normalize_tool(item.get("tool") or item.get("tool_hint", "llm"))
+                    step_input = str(item.get("input") or item.get("description") or original_task).strip()
+                    parsed_steps.append({
+                        "step_num": i + 1,
+                        "tool": tool,
+                        "input": step_input,
+                        "status": "pending",
+                    })
+        # 1. Collapse multiple redundant consecutive 'code' steps into one code step
+        filtered_steps = []
+        has_code_step = False
+        for s in parsed_steps:
+            if s.get("tool") == "code":
+                if not has_code_step:
+                    filtered_steps.append(s)
+                    has_code_step = True
+            else:
+                filtered_steps.append(s)
+        parsed_steps = filtered_steps
+
+        # 2. Compound intent preservation across multimodal, code, creative writing, and documentation:
+        task_lower = original_task.lower()
+        has_img_intent = any(ext in task_lower for ext in (".png", ".jpg", ".jpeg", ".bmp", ".webp")) or bool(
+            attachment_type and attachment_type.lower() in ("image", "photo", "picture", "file")
+        ) or "analyse this image" in task_lower or "analyze this image" in task_lower or "attached file" in task_lower
+
+        has_code_intent = any(w in task_lower for w in ["python", "script", "print ", "write a code", "write python", "execute code", "sandbox"])
+        has_poem_intent = any(w in task_lower for w in ["poem", "poetry", "rhyme", "verse", "song"])
+        has_doc_intent = any(kw in task_lower for kw in [
+            "create a document", "create document", "draft a document", "draft document",
+            "make a document", "generate document", "generate a document", "generate docx",
+            "write a report", "draft a report", "create a report", "document for this", "document this"
+        ])
+
+        # If vision tool was planned alongside other intents, make sure Step 1 input is clean
+        has_vision_step = any(s.get("tool") == "vision" for s in parsed_steps)
+        if has_vision_step:
+            for s in parsed_steps:
+                if s.get("tool") == "vision":
+                    if has_code_intent or has_poem_intent or has_doc_intent:
+                        s["input"] = "Inspect and analyze the attached image in detail."
+
+        # Ensure poem step exists if requested
+        has_poem_step = any(s.get("tool") == "llm" for s in parsed_steps)
+        if has_poem_intent and not has_poem_step and len(parsed_steps) < MAX_TOTAL_STEPS:
+            parsed_steps.append({
+                "step_num": len(parsed_steps) + 1,
+                "tool": "llm",
+                "input": "Create a poem inspired by the image analysis.",
+                "status": "pending",
+            })
+
+        # Ensure code step exists if requested
+        has_code_step = any(s.get("tool") == "code" for s in parsed_steps)
+        if has_code_intent and not has_code_step and len(parsed_steps) < MAX_TOTAL_STEPS:
+            m = re.search(r"write (?:a )?python code to (.*)", original_task, re.IGNORECASE)
+            c_input = f"Write and run a Python script to {m.group(1).strip()}" if m else f"Write and execute Python script as requested in: {original_task}"
+            parsed_steps.append({
+                "step_num": len(parsed_steps) + 1,
+                "tool": "code",
+                "input": c_input,
+                "status": "pending",
+            })
+
+        # Ensure document step exists if requested
+        has_doc_step = any(s.get("tool") == "document" for s in parsed_steps)
+        if has_doc_intent and not has_doc_step and len(parsed_steps) < MAX_TOTAL_STEPS:
+            parsed_steps.append({
+                "step_num": len(parsed_steps) + 1,
+                "tool": "document",
+                "input": f"Draft formal document for: {original_task}",
+                "status": "pending",
+            })
+
+        for i, s in enumerate(parsed_steps):
+            s["step_num"] = i + 1
+    except Exception:
         parsed_steps = []
 
-    # Sanity checks:
-    # 1. Collapse consecutive duplicate "llm" steps
-    collapsed: List[dict] = []
-    for s in parsed_steps:
-        if collapsed and s["tool"] == "llm" and collapsed[-1]["tool"] == "llm":
-            continue
-        collapsed.append(s)
+    if not parsed_steps:
+        # High confidence fallback based on keywords and attachments
+        task_lower = original_task.lower()
+        has_img_intent = any(ext in task_lower for ext in (".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".webp")) or bool(
+            attachment_type and attachment_type.lower() in ("image", "photo", "picture", "file")
+        ) or "analyse this image" in task_lower or "analyze this image" in task_lower or "attached file" in task_lower
+        has_doc_intent = any(kw in task_lower for kw in [
+            "create a document", "create document", "draft a document", "draft document",
+            "make a document", "generate document", "generate a document", "generate docx",
+            "write a report", "draft a report", "create a report", "document for this", "document this"
+        ])
+        has_code_intent = any(w in task_lower for w in ["python", "script", "code", "program", "compile", "sandbox", "print "])
+        has_poem_intent = any(w in task_lower for w in ["poem", "poetry", "rhyme", "verse", "song"])
 
-    # 2. Task-type integrity
-    if task_type == "search":
-        for s in collapsed:
-            if s["tool"] == "document":
-                s["tool"] = "search"
-    elif task_type == "document" and collapsed:
-        if not any(s["tool"] == "document" for s in collapsed):
-            collapsed[-1]["tool"] = "document"
-    elif task_type == "vision" and collapsed:
-        if not any(s["tool"] == "vision" for s in collapsed):
-            collapsed[0]["tool"] = "vision"
+        if has_img_intent and (has_poem_intent or has_code_intent or has_doc_intent):
+            parsed_steps = [
+                {"step_num": 1, "tool": "vision", "input": "Analyze the attached image in detail.", "status": "pending"}
+            ]
+            if has_poem_intent:
+                parsed_steps.append({
+                    "step_num": len(parsed_steps) + 1,
+                    "tool": "llm",
+                    "input": "Create a poem inspired by the image analysis.",
+                    "status": "pending",
+                })
+            if has_code_intent:
+                m = re.search(r"write (?:a )?python code to (.*)", original_task, re.IGNORECASE)
+                c_input = f"Write and run a Python script to {m.group(1).strip()}" if m else f"Write and execute Python script as requested in: {original_task}"
+                parsed_steps.append({
+                    "step_num": len(parsed_steps) + 1,
+                    "tool": "code",
+                    "input": c_input,
+                    "status": "pending",
+                })
+            if has_doc_intent:
+                parsed_steps.append({
+                    "step_num": len(parsed_steps) + 1,
+                    "tool": "document",
+                    "input": f"Draft formal document for: {original_task}",
+                    "status": "pending",
+                })
+        elif has_code_intent and has_doc_intent:
+            parsed_steps = [
+                {"step_num": 1, "tool": "code", "input": original_task, "status": "pending"},
+                {"step_num": 2, "tool": "document", "input": f"Draft formal document for: {original_task}", "status": "pending"},
+            ]
+        elif any(w in task_lower for w in ["ocr", "scan", "scanned"]):
+            fallback_tool = "ocr"
+            parsed_steps = [{"step_num": 1, "tool": fallback_tool, "input": original_task, "status": "pending"}]
+        elif has_img_intent:
+            fallback_tool = "vision"
+            parsed_steps = [{"step_num": 1, "tool": fallback_tool, "input": original_task, "status": "pending"}]
+        elif has_code_intent:
+            fallback_tool = "code"
+            parsed_steps = [{"step_num": 1, "tool": fallback_tool, "input": original_task, "status": "pending"}]
+        elif any(w in task_lower for w in ["calculate", "compute", "arithmetic", "sum of", "solve for"]):
+            fallback_tool = "calc"
+            parsed_steps = [{"step_num": 1, "tool": fallback_tool, "input": original_task, "status": "pending"}]
+        elif has_doc_intent:
+            fallback_tool = "document"
+            parsed_steps = [{"step_num": 1, "tool": fallback_tool, "input": original_task, "status": "pending"}]
+        elif any(w in task_lower for w in ["search", "sop", "procedure", "guideline", "standard operating procedure"]):
+            fallback_tool = "search"
+            parsed_steps = [{"step_num": 1, "tool": fallback_tool, "input": original_task, "status": "pending"}]
+        else:
+            fallback_tool = "llm"
+            parsed_steps = [{"step_num": 1, "tool": fallback_tool, "input": original_task, "status": "pending"}]
 
-    # 3. If empty, fallback to single step
-    if not collapsed:
-        fallback_tool = (
-            "document"
-            if task_type == "document"
-            else ("search" if task_type == "search" else ("vision" if task_type == "vision" else "llm"))
-        )
-        collapsed = [{"tool": fallback_tool, "input": fallback_input}]
-
-    # Format numbered steps
-    steps: List[dict] = []
-    for i, s in enumerate(collapsed[:max_steps]):
-        steps.append({
-            "step_num": i + 1,
-            "tool": s["tool"],
-            "input": s["input"],
-            "status": "pending",
-        })
-
-    return steps
+    return parsed_steps
 
 
 def _run_stub_tool(tool: str, input_str: str, original_task: str, revise_count: int) -> Tuple[str, bool]:
@@ -202,97 +412,159 @@ def _run_stub_tool(tool: str, input_str: str, original_task: str, revise_count: 
 # Nodes
 # ---------------------------------------------------------------------------
 
-def plan_node(state: AgentState) -> dict:
-    is_revision = state["status"] == "revising"
-    revise_count = state.get("revise_count", 0)
+def master_plan_node(state: AgentState) -> dict:
+    """Master Planner Layer: Decomposes the user request into ordered sub-tasks before routing."""
     reasoning_model = registry.get_model("reasoning")
-
-    failure_context = ""
-    if is_revision and state["step_outputs"]:
-        last = state["step_outputs"][-1]
-        if last["tool"] == "code":
-            guidance = (
-                "The code failed to run. Revise the plan to include a 'code' step that "
-                "regenerates and re-runs a corrected script accomplishing the same task."
-            )
-        elif last["tool"] == "search":
-            if state["routing_decision"].get("task_type") == "document":
-                guidance = "Revise the plan to either use broader search keywords or proceed to document the missing documentation."
-            else:
-                guidance = "Revise the plan to use broader or alternative search keywords to answer the query directly."
-        elif last["tool"] == "calc":
-            guidance = "The calculation failed or had missing inputs. Revise the plan to search/extract the missing values first."
-        else:
-            guidance = "Revise the plan to work around this failure."
-        failure_context = (
-            f"\n\nIMPORTANT: A previous attempt at step {last['step_num']} "
-            f"(tool: {last['tool']}) reported: {last['output']}\n"
-            f"{guidance}"
-        )
-
+    _log_terminal("Planner", f"Decomposing task using planner model '{reasoning_model}'...")
     history_section = ""
     if state.get("history_context"):
         history_section = f"{state['history_context']}\n"
 
-    prompt = PLAN_PROMPT_TEMPLATE.format(
+    attachment_info = ""
+    if state.get("attachment_type"):
+        attachment_info = f"Attachment present (type: {state['attachment_type']})\n"
+
+    prompt = MASTER_PLAN_PROMPT_TEMPLATE.format(
         history_section=history_section,
         task=state["original_task"],
-        task_type=state["routing_decision"]["task_type"],
-        failure_context=failure_context,
+        attachment_info=attachment_info,
     )
-
 
     thought = {
         "role": "thought",
-        "content": (
-            f"Re-planning after observation (revision #{revise_count + 1})."
-            if is_revision
-            else "Planning steps for task."
-        ),
+        "content": "Master Planner: Analyzing user request and decomposing into ordered sub-tasks.",
     }
 
     try:
         raw = ollama.generate(reasoning_model, prompt)
-    except Exception as exc:  # noqa: BLE001 - surfaced into the plan fallback
+        if not raw.strip():
+            _log_terminal("Planner", f"[WARN] Reasoning model '{reasoning_model}' returned empty plan. Using keyword fallback.")
+    except Exception as exc:  # noqa: BLE001
         raw = ""
-        thought = {"role": "thought", "content": f"Planning LLM call failed ({exc}); using single-step fallback plan."}
+        _log_terminal("Planner", f"[ERROR] Master Planner LLM call failed: {exc}. Using keyword fallback.")
+        thought = {"role": "thought", "content": f"Master Planner LLM call error ({exc}); using fallback single-step plan."}
 
-    steps = _parse_plan(
+    steps = _parse_master_plan(
         raw,
-        fallback_input=state["original_task"],
-        task_type=state["routing_decision"].get("task_type"),
-        is_revision=is_revision,
+        original_task=state["original_task"],
+        attachment_type=state.get("attachment_type"),
     )
-    action = {"role": "action", "content": f"Generated plan: {json.dumps(steps)}"}
+
+    _log_terminal("Planner", f"[OK] Master Plan established ({len(steps)} sub-task(s)):")
+    for s in steps:
+        _log_terminal("Planner", f"   * Step {s['step_num']}: [{s['tool']}] {s['input'][:85]}")
+
+    action = {"role": "action", "content": f"Master Plan established ({len(steps)} sub-task(s)): {json.dumps(steps)}"}
 
     log_event(
         task_id=state.get("task_id"),
         event_type="plan",
         actor=reasoning_model,
-        summary=f"{'Re-planned' if is_revision else 'Generated plan'} with {len(steps)} steps",
+        summary=f"Master Planner decomposed request into {len(steps)} sub-task(s)",
         metadata={
             "task": state.get("original_task"),
             "model": reasoning_model,
-            "is_revision": is_revision,
-            "revise_count": revise_count,
             "steps": steps,
+            "step_count": len(steps),
         },
         external_calls=0,
     )
 
-    update = {
+    emit_sync(
+        state.get("task_id"),
+        "plan",
+        {
+            "task_id": state.get("task_id"),
+            "steps": steps,
+            "step_count": len(steps),
+            "model": reasoning_model,
+        },
+    )
+
+    return {
         "plan": steps,
         "current_step": 0,
         "status": "executing",
+        "shared_memory": "",
         "trace": [thought, action],
         "messages": [
             {"role": "user", "content": prompt},
             {"role": "assistant", "content": raw},
         ],
     }
-    if is_revision:
-        update["revise_count"] = revise_count + 1
-    return update
+
+
+def route_subtask_node(state: AgentState) -> dict:
+    """Per-Subtask Intent Routing: Evaluates the active subtask and selects the model role and tool."""
+    idx = state["current_step"]
+    step = state["plan"][idx]
+
+    # Intent routing for this specific sub-task
+    routing_dec = route(
+        task=step["input"],
+        attachment_type=state.get("attachment_type"),
+        hint=step.get("tool"),
+        context=state.get("shared_memory"),
+    )
+
+    # Align subtask tool with the routed intent
+    step["tool"] = routing_dec.task_type
+    step["status"] = "executing"
+    model_tag = registry.get_model(routing_dec.model_role)
+    step["model"] = model_tag
+    step["model_role"] = routing_dec.model_role
+
+    _log_terminal(
+        "Router",
+        f"[SWITCH] Step {step['step_num']}/{len(state['plan'])}: Routing to '{routing_dec.task_type}' | Active model switched to '{model_tag}' ({routing_dec.model_role})",
+    )
+
+
+    thought = {
+        "role": "thought",
+        "content": (
+            f"Sub-Task {step['step_num']}/{len(state['plan'])}: "
+            f"Routed to intent '{routing_dec.task_type}' (Model: {routing_dec.model_role} -> {model_tag}). "
+            f"Reason: {routing_dec.reason}"
+        ),
+    }
+
+    log_event(
+        task_id=state.get("task_id"),
+        event_type="route",
+        actor="router",
+        summary=f"Sub-Task {step['step_num']} routed to '{routing_dec.task_type}' ({routing_dec.model_role})",
+        metadata={
+            "step_num": step["step_num"],
+            "subtask_input": step["input"],
+            "task_type": routing_dec.task_type,
+            "model_role": routing_dec.model_role,
+            "model_tag": model_tag,
+            "tools_needed": routing_dec.tools_needed,
+            "reason": routing_dec.reason,
+        },
+        external_calls=0,
+    )
+
+    emit_sync(
+        state.get("task_id"),
+        "step_start",
+        {
+            "task_id": state.get("task_id"),
+            "step_num": step["step_num"],
+            "total_steps": len(state["plan"]),
+            "tool": routing_dec.task_type,
+            "model": model_tag,
+            "model_role": routing_dec.model_role,
+            "input": step["input"],
+        },
+    )
+
+    return {
+        "routing_decision": routing_dec.model_dump(),
+        "trace": [thought],
+    }
+
 
 
 def execute_node(state: AgentState) -> dict:
@@ -301,257 +573,37 @@ def execute_node(state: AgentState) -> dict:
     tool = step["tool"]
     step_input = step["input"]
 
+    _log_terminal(
+        "Executor",
+        f"[RUN] Executing Sub-Task {step['step_num']}/{len(state['plan'])} [{tool}] with model '{step.get('model', 'specialist')}'...",
+    )
+
     thought = {"role": "thought", "content": f"Executing step {step['step_num']}: tool='{tool}', input={step_input!r}"}
     action = {"role": "action", "content": f"CALL {tool}({step_input!r})"}
-    messages_update: List[dict] = []
-    doc_meta: dict = {}
-    code_meta: dict = {}
-    extra_meta: dict = {}
-    is_grounded_flag = True
 
-    if tool == "llm":
-        role = state["routing_decision"]["model_role"]
-        model = registry.get_model(role)
-        actor = model
-        llm_prompt = step_input
-        if state.get("history_context"):
-            llm_prompt = f"{state['history_context']}\nUser query: {step_input}"
-        try:
-            output = ollama.generate(model, llm_prompt)
-            is_error = False
-        except Exception as exc:  # noqa: BLE001 - becomes an observed [error]
-            output = f"[error] llm call failed: {exc}"
-            is_error = True
-        messages_update = [
-            {"role": "user", "content": step_input},
-            {"role": "assistant", "content": output},
-        ]
-        sources = None
-    elif tool == "search":
-        actor = "vault_search"
-        result = search_tool(step_input, task_id=state.get("task_id"))
-        answer = result["answer"]
-        sources = result.get("sources", [])
-        is_grounded_flag = result.get("grounded", True)
-        if sources:
-            filenames = ", ".join(sorted({s["filename"] for s in sources}))
-            output = f"{answer}\n\n[Sources: {filenames}]"
-        else:
-            output = answer
-        is_error = False
-    elif tool == "calc":
-        actor = "calc_tool"
-        sources = None
-        prior_context_list = [o["output"] for o in state["step_outputs"]]
-        context_str = "\n".join(prior_context_list) if prior_context_list else None
-        calc_res = calc_tool(step_input, context=context_str, task_id=state.get("task_id"))
-        if calc_res.get("success"):
-            output = f"Calculation '{calc_res['formula_name']}':\n" + "\n".join(calc_res.get("steps", []))
-            is_error = False
-        else:
-            output = f"[error] {calc_res.get('error', 'Calculation failed')}"
-            is_error = True
-        extra_meta = {
-            "calc_result": calc_res.get("result"),
-            "formula_name": calc_res.get("formula_name"),
-            "unit": calc_res.get("unit"),
-        }
-    elif tool == "ocr":
-        actor = "ocr_tool"
-        sources = None
-        try:
-            ocr_res = ocr_tool_extract(step_input.strip(), task_id=state.get("task_id"))
-            output = f"OCR Extracted Text (Engine: {ocr_res['engine']}, Confidence: {ocr_res['confidence']:.2f}):\n{ocr_res['text']}"
-            is_error = False
-            actor = ocr_res["engine"]
-            extra_meta = {
-                "engine": ocr_res["engine"],
-                "confidence": ocr_res["confidence"],
-                "low_confidence": ocr_res["low_confidence"],
-            }
-        except Exception as exc:
-            output = f"[error] OCR extraction failed: {exc}"
-            is_error = True
-    elif tool == "vision":
-        actor = registry.get_model("vision")
-        sources = None
-        try:
-            raw_input = step_input.strip()
-            target_str = raw_input
-            q_target = None
-            if "|" in raw_input:
-                parts = raw_input.split("|", 1)
-                target_str = parts[0].strip()
-                q_target = parts[1].strip()
+    dispatch_res = dispatch_tool(tool, step_input, state)
 
-            # Check if target_str is already a path or if we need to extract from text/task
-            img_path_to_use = target_str
-            img_pattern = r"([A-Za-z]:\\[^\r\n<>:\"|?*]+\.(?:png|jpg|jpeg|bmp|tiff|webp)|\S+\.(?:png|jpg|jpeg|bmp|tiff|webp))"
-            
-            # If target_str doesn't exist directly, search in target_str or original_task
-            try:
-                from backend.tools.vision import _resolve_image_path
-                img_path_to_use = str(_resolve_image_path(target_str))
-            except Exception:
-                # Look for an image filename / path match in raw_input
-                m = re.search(img_pattern, raw_input, re.IGNORECASE)
-                if m:
-                    img_path_to_use = m.group(1).strip()
-                    if not q_target:
-                        q_target = raw_input.replace(m.group(0), "").replace("Attached file:", "").strip() or None
-                else:
-                    # Look in original_task
-                    m_orig = re.search(img_pattern, state.get("original_task", ""), re.IGNORECASE)
-                    if m_orig:
-                        img_path_to_use = m_orig.group(1).strip()
-                        if not q_target:
-                            q_target = raw_input.replace("Attached file:", "").strip() or None
+    output = dispatch_res["output"]
+    is_error = dispatch_res["is_error"]
+    actor = dispatch_res["actor"]
+    sources = dispatch_res["sources"]
+    is_grounded_flag = dispatch_res["is_grounded"]
+    doc_meta = dispatch_res["doc_meta"]
+    code_meta = dispatch_res["code_meta"]
+    extra_meta = dispatch_res["extra_meta"]
+    messages_update = dispatch_res["messages_update"]
+    new_facts = dispatch_res.get("key_facts", {})
 
-            logger.info(f"[AGENT] Invoking vision tool with image={img_path_to_use}, question={q_target}")
-            vis_res = vision_tool_describe(img_path_to_use, question=q_target, task_id=state.get("task_id"))
-            output = vis_res["description"]
-            is_error = False
-            extra_meta = {"image_path": vis_res["image_path"], "question": q_target}
-        except Exception as exc:
-            logger.error(f"[AGENT] Vision tool failed: {exc}")
-            output = f"[error] Vision analysis failed: {exc}"
-            is_error = True
-    elif tool == "code":
-        actor = registry.get_model("code")
-        sources = None
+    accumulated_key_facts = dict(state.get("key_facts") or {})
+    accumulated_key_facts.update(new_facts)
 
-        prior_error = None
-        for prev in reversed(state["step_outputs"]):
-            if prev.get("tool") == "code" and prev.get("error"):
-                prior_error = prev.get("stderr") or prev.get("output")
-                break
-
-        code_result = code_tool_run(
-            step_input,
-            prior_error=prior_error,
-            timeout_seconds=CODE_TIMEOUT_SECONDS,
-            task_id=state.get("task_id"),
-        )
-        is_error = not code_result["success"]
-        if is_error:
-            output = (
-                f"[error] code execution failed (exit_code={code_result['exit_code']}, "
-                f"timed_out={code_result['timed_out']}).\nstderr:\n{code_result['stderr']}"
-            )
-        else:
-            output = f"Code executed successfully (exit_code=0).\nstdout:\n{code_result['stdout']}"
-
-        code_meta = {
-            "language": code_result.get("language", "python"),
-            "code": code_result["code"],
-            "stdout": code_result["stdout"],
-            "stderr": code_result["stderr"],
-            "exit_code": code_result["exit_code"],
-            "timed_out": code_result["timed_out"],
-            "duration_seconds": code_result.get("duration_seconds", 0.0),
-        }
-    elif tool == "document":
-        actor = "writer"
-        prior_sources: List[dict] = []
-        has_search = False
-        has_grounded_search = False
-        last_search_grounded = None
-
-        for prev_out in state["step_outputs"]:
-            if prev_out.get("tool") == "search":
-                has_search = True
-                if prev_out.get("grounded", False):
-                    has_grounded_search = True
-                    last_search_grounded = True
-                    if "sources" in prev_out and prev_out["sources"]:
-                        existing_fns = {s["filename"] for s in prior_sources if "filename" in s}
-                        for s in prev_out["sources"]:
-                            if s.get("filename") not in existing_fns:
-                                prior_sources.append(s)
-                                existing_fns.add(s.get("filename"))
-                else:
-                    last_search_grounded = False
-
-        if has_grounded_search:
-            is_doc_grounded = True
-        elif has_search:
-            is_doc_grounded = bool(last_search_grounded)
-        else:
-            is_doc_grounded = True
-
-        try:
-            # Produce structured JSON draft first
-            structured = draft_document(
-                step_input,
-                sources=prior_sources if is_doc_grounded else [],
-                is_grounded=is_doc_grounded,
-            )
-            title = structured.get("title", "Technical Document")
-            sections_list = structured.get("sections", [])
-            sources = structured.get("sources", [])
-
-            # Assess risk using Phase 11 heuristic
-            risk_info = assess_risk(
-                task_type="document",
-                document_content=structured,
-                sources_used=prior_sources if is_doc_grounded else [],
-            )
-
-            # Check if approval is required (medium or high risk)
-            if risk_info.get("risk") in {"medium", "high"}:
-                task_id = state.get("task_id") or str(uuid.uuid4())
-                request_approval(
-                    task_id=task_id,
-                    document_content=structured,
-                    risk_assessment=risk_info,
-                    sources=prior_sources if is_doc_grounded else [],
-                )
-                output = (
-                    f"Drafted document '{title}' (Risk: {risk_info['risk'].upper()}, "
-                    f"Confidence: {risk_info['confidence'] * 100:.0f}%).\n"
-                    f"Reasoning: {risk_info['reasoning']}\n"
-                    f"Sections: {', '.join(s.get('heading', '') for s in sections_list)}\n"
-                    f"Status: PAUSED for human approval before rendering final .docx."
-                )
-                is_error = False
-                doc_meta = {
-                    "title": title,
-                    "grounded": is_doc_grounded,
-                    "awaiting_approval": True,
-                    "risk": risk_info["risk"],
-                    "confidence": risk_info["confidence"],
-                    "reasoning": risk_info["reasoning"],
-                    "draft_content": structured,
-                }
-            else:
-                # Low risk document: render docx immediately
-                file_path = render_docx(structured)
-                output = (
-                    f"Generated document '{title}' saved to {file_path.name}.\n"
-                    f"File path: {file_path}\n"
-                    f"Grounded in SOPs: {is_doc_grounded}\n"
-                    f"Sections: {', '.join(s.get('heading', '') for s in sections_list)}"
-                )
-                is_error = False
-                doc_meta = {
-                    "file_path": str(file_path),
-                    "filename": file_path.name,
-                    "title": title,
-                    "grounded": is_doc_grounded,
-                    "awaiting_approval": False,
-                }
-        except Exception as exc:  # noqa: BLE001
-            output = f"[error] document generation failed: {exc}"
-            is_error = True
-            sources = None
-    else:
-        actor = tool
-        sources = None
-        output, is_error = _run_stub_tool(tool, step_input, state["original_task"], state.get("revise_count", 0))
+    _log_terminal("Executor", f"[DONE] Step {step['step_num']} [{tool}] completed ({'ERROR' if is_error else 'OK'}) using model '{actor}'.")
 
     step_output = {
         "step_num": step["step_num"],
         "tool": tool,
+        "model": actor,
+        "model_role": step.get("model_role", "reasoning"),
         "input": step_input,
         "output": output,
         "error": is_error,
@@ -566,18 +618,27 @@ def execute_node(state: AgentState) -> dict:
     if extra_meta:
         step_output.update(extra_meta)
 
+    step["status"] = "failed" if is_error else "done"
+    step["model"] = actor
+    step["output"] = output
+
+    output_summary = f"[Sub-Task {step['step_num']} ({tool}) Result]:\n{output}"
+    current_mem = state.get("shared_memory", "")
+    new_shared_mem = f"{current_mem}\n\n{output_summary}".strip() if current_mem else output_summary
+
     observation = {"role": "observation", "content": f"Result: {output[:300]}"}
 
     log_event(
         task_id=state.get("task_id"),
         event_type="step",
         actor=actor,
-        summary=f"Step {step['step_num']} ({tool}): {'ERROR' if is_error else 'OK'} - {output[:100]}",
+        summary=f"Sub-Task {step['step_num']} ({tool}): {'ERROR' if is_error else 'OK'} - {output[:100]}",
         metadata={
             "task": state.get("original_task"),
             "step_num": step["step_num"],
             "tool": tool,
             "model": actor,
+            "model_role": step.get("model_role"),
             "input": step_input,
             "output_preview": output[:300],
             "error": is_error,
@@ -589,28 +650,45 @@ def execute_node(state: AgentState) -> dict:
         external_calls=0,
     )
 
+    emit_sync(
+        state.get("task_id"),
+        "tool_done",
+        {
+            "task_id": state.get("task_id"),
+            "step_num": step["step_num"],
+            "tool": tool,
+            "output_preview": output[:300],
+            "error": is_error,
+            "key_facts": accumulated_key_facts,
+        },
+    )
+
     return {
         "step_outputs": [step_output],
+        "shared_memory": new_shared_mem,
+        "key_facts": accumulated_key_facts,
         "trace": [thought, action, observation],
         "messages": messages_update,
     }
 
 
 def observe_node(state: AgentState) -> dict:
+    """Evaluates the execution output using the LLM controller to determine next dynamic action."""
     last_output = state["step_outputs"][-1]
-    total_executed = len(state["step_outputs"])
     is_error = last_output.get("error", False)
-    is_ungrounded_search = (last_output.get("tool") == "search") and not last_output.get("grounded", True)
+    is_ungrounded_search = (last_output.get("tool") == "search") and not last_output.get("sources")
+    revise_count = state.get("revise_count", 0)
+    replan_count = state.get("replan_count", 0)
 
     trace_entries = [
         {
             "role": "observation",
-            "content": f"Step {last_output['step_num']} ({last_output['tool']}) -> "
+            "content": f"Sub-Task {last_output['step_num']} ({last_output['tool']}) -> "
             f"{'ERROR' if is_error else ('UNGROUNDED' if is_ungrounded_search else 'OK')}: {last_output['output'][:200]}",
         }
     ]
 
-    # Check for approval gate pause
+    # Human approval gate pause takes immediate precedence
     if last_output.get("tool") == "document" and last_output.get("awaiting_approval"):
         trace_entries.append(
             {
@@ -626,93 +704,416 @@ def observe_node(state: AgentState) -> dict:
             metadata={"decision": "awaiting_approval", "risk": last_output.get("risk")},
             external_calls=0,
         )
+        emit_sync(
+            state.get("task_id"),
+            "observe",
+            {
+                "task_id": state.get("task_id"),
+                "action": "awaiting_approval",
+                "reasoning": f"Document '{last_output.get('title')}' paused for human approval",
+                "status": "awaiting_approval",
+            },
+        )
         return {"trace": trace_entries, "status": "awaiting_approval"}
 
-    if total_executed >= MAX_TOTAL_STEPS:
-        status = "failed" if is_error else "complete"
-        trace_entries.append(
-            {"role": "thought", "content": f"Hard cap of {MAX_TOTAL_STEPS} steps reached. Forcing finish."}
-        )
-        log_event(
-            task_id=state.get("task_id"),
-            event_type="observe",
-            actor="agent_loop",
-            summary=f"Hard cap of {MAX_TOTAL_STEPS} steps reached. Forcing finish.",
-            metadata={"decision": "finish", "status": status, "total_executed": total_executed},
-            external_calls=0,
-        )
-        return {"trace": trace_entries, "status": status}
+    # Autonomous LLM Reasoning Controller: Ask LLM to evaluate status and decide action
+    reasoning_model = registry.get_model("reasoning")
+    plan_overview = "\n".join(
+        f"- Step {s['step_num']} [{s['tool']}]: {s['input']} (Status: {s.get('status', 'pending')})"
+        for s in state["plan"]
+    )
+    status_str = "FAILED" if is_error else ("UNGROUNDED_SEARCH" if is_ungrounded_search else "SUCCESS")
+    key_facts_json = json.dumps(state.get("key_facts", {}), indent=2)
+    total_steps = len(state["plan"])
 
-    if is_error:
-        if state.get("revise_count", 0) >= MAX_REVISIONS:
-            trace_entries.append(
-                {"role": "thought", "content": "Max revisions reached; giving up on repair, finishing with failure."}
+    prompt = OBSERVE_PROMPT_TEMPLATE.format(
+        task=state["original_task"],
+        plan_overview=plan_overview,
+        step_num=last_output["step_num"],
+        total_steps=total_steps,
+        tool=last_output["tool"],
+        step_input=last_output["input"],
+        status_str=status_str,
+        output_preview=last_output["output"][:1200],
+        key_facts_json=key_facts_json,
+    )
+
+    action = "continue"
+    reasoning = "Sub-task executed successfully."
+    new_steps: List[dict] = []
+    retry_instruction = ""
+    clarify_question = ""
+
+    try:
+        raw = ollama.generate(reasoning_model, prompt).strip()
+        match = re.search(r"\{.*\}", raw, re.DOTALL)
+        if match:
+            parsed = json.loads(match.group(0))
+            action = str(parsed.get("action", "continue")).strip().lower()
+            reasoning = str(parsed.get("reasoning", "")).strip()
+            new_steps = parsed.get("new_steps") or []
+            retry_instruction = str(parsed.get("retry_instruction", "")).strip()
+            clarify_question = str(parsed.get("clarify_question", "")).strip()
+        else:
+            raise ValueError("No valid JSON found in LLM response")
+    except Exception as exc:
+        _log_terminal("Observer", f"[WARN] LLM observe reasoning failed ({exc}); falling back to deterministic policy.")
+        if is_error or (is_ungrounded_search and revise_count == 0):
+            if revise_count < MAX_REVISIONS:
+                action = "retry"
+                reasoning = "Tool error detected; triggering self-correcting retry."
+            elif state["current_step"] + 1 < len(state["plan"]):
+                action = "continue"
+                reasoning = "Step error unresolved after retries; continuing with remaining plan."
+            else:
+                action = "done"
+                reasoning = "Final step completed with error."
+        elif state["current_step"] + 1 < len(state["plan"]):
+            action = "continue"
+            reasoning = "Step succeeded; continuing to next step."
+        else:
+            action = "done"
+            reasoning = "All plan steps completed."
+
+    observe_decision = {
+        "action": action,
+        "reasoning": reasoning,
+        "new_steps": new_steps,
+        "retry_instruction": retry_instruction,
+        "clarify_question": clarify_question,
+    }
+
+    _log_terminal("Observer", f"[DECISION] Action: '{action.upper()}' | {reasoning}")
+
+    if action == "clarify" and clarify_question:
+        trace_entries.append({"role": "thought", "content": f"Clarification required: {clarify_question}"})
+        emit_sync(
+            state.get("task_id"),
+            "observe",
+            {"task_id": state.get("task_id"), "action": "clarify", "reasoning": reasoning, "status": "clarifying"},
+        )
+        return {
+            "trace": trace_entries,
+            "status": "clarifying",
+            "observe_decision": observe_decision,
+            "clarify_question": clarify_question,
+        }
+
+    if action == "replan" and replan_count < MAX_REVISIONS:
+        if not new_steps:
+            task_l = state["original_task"].lower()
+            executed_tools = {o.get("tool") for o in state.get("step_outputs", [])}
+            if any(w in task_l for w in ("poem", "poetry", "rhyme")) and "llm" not in executed_tools:
+                new_steps.append({"tool": "llm", "input": "Create a poem inspired by the image analysis."})
+            if any(w in task_l for w in ("python", "code", "script", "print ")) and "code" not in executed_tools:
+                m = re.search(r"write (?:a )?python code to (.*)", state["original_task"], re.IGNORECASE)
+                c_inp = f"Write and run a Python script to {m.group(1).strip()}" if m else f"Write and execute Python script as requested in: {state['original_task']}"
+                new_steps.append({"tool": "code", "input": c_inp})
+            if any(w in task_l for w in ("document", "docx", "report")) and "document" not in executed_tools:
+                new_steps.append({"tool": "document", "input": f"Draft formal document for: {state['original_task']}"})
+        if new_steps:
+            observe_decision["new_steps"] = new_steps
+            trace_entries.append({"role": "thought", "content": f"Dynamic replanning triggered: {reasoning}"})
+            emit_sync(
+                state.get("task_id"),
+                "observe",
+                {"task_id": state.get("task_id"), "action": "replan", "reasoning": reasoning, "status": "replan"},
             )
-            log_event(
-                task_id=state.get("task_id"),
-                event_type="observe",
-                actor="agent_loop",
-                summary="Max revisions reached. Terminating with failure.",
-                metadata={"decision": "failed", "revise_count": state.get("revise_count", 0)},
-                external_calls=0,
+            return {
+                "trace": trace_entries,
+                "status": "replan",
+                "observe_decision": observe_decision,
+            }
+
+    if action == "retry" or is_error:
+        if revise_count < MAX_REVISIONS:
+            trace_entries.append({"role": "thought", "content": f"Self-correction retry triggered: {reasoning}"})
+            if retry_instruction:
+                state["plan"][state["current_step"]]["input"] = retry_instruction
+            emit_sync(
+                state.get("task_id"),
+                "observe",
+                {"task_id": state.get("task_id"), "action": "retry", "reasoning": reasoning, "status": "revising"},
             )
-            return {"trace": trace_entries, "status": "failed"}
+            return {
+                "trace": trace_entries,
+                "status": "revising",
+                "observe_decision": observe_decision,
+            }
+        else:
+            if state["current_step"] + 1 < len(state["plan"]):
+                next_step = state["current_step"] + 1
+                trace_entries.append({"role": "thought", "content": f"Step retries exhausted; continuing to Step {next_step + 1}."})
+                emit_sync(
+                    state.get("task_id"),
+                    "observe",
+                    {"task_id": state.get("task_id"), "action": "continue", "reasoning": reasoning, "status": "executing"},
+                )
+                return {
+                    "trace": trace_entries,
+                    "current_step": next_step,
+                    "status": "executing",
+                    "revise_count": 0,
+                    "observe_decision": observe_decision,
+                }
+            else:
+                trace_entries.append({"role": "thought", "content": "Workflow terminated with error on final step."})
+                emit_sync(
+                    state.get("task_id"),
+                    "observe",
+                    {"task_id": state.get("task_id"), "action": "done", "reasoning": reasoning, "status": "failed"},
+                )
+                return {
+                    "trace": trace_entries,
+                    "status": "failed",
+                    "observe_decision": observe_decision,
+                }
 
-        trace_entries.append(
-            {"role": "thought", "content": "Error detected in last step. Self-correcting: routing to REVISE (re-plan)."}
-        )
-        log_event(
-            task_id=state.get("task_id"),
-            event_type="observe",
-            actor="agent_loop",
-            summary=f"Error detected in step {last_output['step_num']}. Self-correcting: routing to REVISE (re-plan).",
-            metadata={"decision": "revise", "failed_step": last_output["step_num"], "error_message": last_output["output"]},
-            external_calls=0,
-        )
-        return {"trace": trace_entries, "status": "revising"}
-
-    if is_ungrounded_search and state.get("revise_count", 0) == 0:
-        trace_entries.append(
-            {"role": "thought", "content": "Search did not find grounded SOP information. Self-correcting: routing to REVISE to try broader search."}
-        )
-        log_event(
-            task_id=state.get("task_id"),
-            event_type="observe",
-            actor="agent_loop",
-            summary=f"Search ungrounded in step {last_output['step_num']}. Routing to REVISE.",
-            metadata={"decision": "revise", "failed_step": last_output["step_num"], "reason": "ungrounded_search"},
-            external_calls=0,
-        )
-        return {"trace": trace_entries, "status": "revising"}
-
+    # Autonomous End-of-Plan Guard:
+    # If the decision was "continue" or "done", but no next step exists in the plan,
+    # verify whether any core goals from the user request remain unfulfilled.
     next_step = state["current_step"] + 1
     if next_step >= len(state["plan"]):
-        trace_entries.append({"role": "thought", "content": "All planned steps completed successfully."})
-        log_event(
-            task_id=state.get("task_id"),
-            event_type="observe",
-            actor="agent_loop",
-            summary="All planned steps completed successfully. Routing to finalize.",
-            metadata={"decision": "complete", "completed_steps": len(state["plan"])},
-            external_calls=0,
-        )
-        return {"trace": trace_entries, "status": "complete"}
+        task_l = state["original_task"].lower()
+        executed_tools = {o.get("tool") for o in state.get("step_outputs", [])}
+        fallback_new_steps = []
+        if any(w in task_l for w in ("poem", "poetry", "rhyme")) and "llm" not in executed_tools:
+            fallback_new_steps.append({"tool": "llm", "input": "Create a poem inspired by the image analysis."})
+        if any(w in task_l for w in ("python", "code", "script", "print ")) and "code" not in executed_tools:
+            m = re.search(r"write (?:a )?python code to (.*)", state["original_task"], re.IGNORECASE)
+            c_inp = f"Write and run a Python script to {m.group(1).strip()}" if m else f"Write and execute Python script as requested in: {state['original_task']}"
+            fallback_new_steps.append({"tool": "code", "input": c_inp})
+        if any(w in task_l for w in ("document", "docx", "report")) and "document" not in executed_tools:
+            fallback_new_steps.append({"tool": "document", "input": f"Draft formal document for: {state['original_task']}"})
 
-    trace_entries.append({"role": "thought", "content": f"Proceeding to step {next_step + 1}."})
+        if fallback_new_steps and replan_count < MAX_REVISIONS:
+            _log_terminal("Observer", f"[GUARD] Detected unfulfilled user requirements at end of plan: {[s['tool'] for s in fallback_new_steps]}. Dynamic replanning triggered.")
+            replan_action = "replan"
+            replan_reasoning = f"Plan reached end, but unfulfilled user tasks detected: {[s['tool'] for s in fallback_new_steps]}. Replanning missing steps."
+            observe_decision["action"] = replan_action
+            observe_decision["new_steps"] = fallback_new_steps
+            observe_decision["reasoning"] = replan_reasoning
+            trace_entries.append({"role": "thought", "content": f"Dynamic replanning triggered: {replan_reasoning}"})
+            emit_sync(
+                state.get("task_id"),
+                "observe",
+                {"task_id": state.get("task_id"), "action": replan_action, "reasoning": replan_reasoning, "status": "replan"},
+            )
+            return {
+                "trace": trace_entries,
+                "status": "replan",
+                "observe_decision": observe_decision,
+            }
+
+    if action == "done":
+        trace_entries.append({"role": "thought", "content": f"Workflow goal satisfied early or completed: {reasoning}"})
+        emit_sync(
+            state.get("task_id"),
+            "observe",
+            {"task_id": state.get("task_id"), "action": "done", "reasoning": reasoning, "status": "complete"},
+        )
+        return {
+            "trace": trace_entries,
+            "status": "complete",
+            "observe_decision": observe_decision,
+        }
+
+    # Default action: continue
+    if next_step < len(state["plan"]):
+        trace_entries.append({"role": "thought", "content": f"Step {last_output['step_num']} done; proceeding to Step {next_step + 1}/{len(state['plan'])}."})
+        emit_sync(
+            state.get("task_id"),
+            "observe",
+            {"task_id": state.get("task_id"), "action": "continue", "reasoning": reasoning, "status": "executing"},
+        )
+        return {
+            "trace": trace_entries,
+            "current_step": next_step,
+            "status": "executing",
+            "revise_count": 0,
+            "observe_decision": observe_decision,
+        }
+
+    trace_entries.append({"role": "thought", "content": "All planned sub-tasks completed successfully. Routing to finalize."})
+    emit_sync(
+        state.get("task_id"),
+        "observe",
+        {"task_id": state.get("task_id"), "action": "done", "reasoning": reasoning, "status": "complete"},
+    )
+    return {
+        "trace": trace_entries,
+        "status": "complete",
+        "observe_decision": observe_decision,
+    }
+
+
+def replan_node(state: AgentState) -> dict:
+    """Dynamic Replanning: Re-structures remaining steps when observe node triggers replan."""
+    decision = state.get("observe_decision") or {}
+    new_step_defs = decision.get("new_steps") or []
+    current_idx = state["current_step"]
+    current_plan = list(state["plan"])
+
+    updated_plan = current_plan[: current_idx + 1]
+    next_num = current_idx + 2
+    for s in new_step_defs:
+        tool_name = _normalize_tool(s.get("tool", "llm"))
+        inp = s.get("input", "")
+        if inp:
+            updated_plan.append({
+                "step_num": next_num,
+                "tool": tool_name,
+                "input": inp,
+                "status": "pending",
+            })
+            next_num += 1
+
+    replan_count = state.get("replan_count", 0) + 1
+    thought = {
+        "role": "thought",
+        "content": f"Dynamic Replan #{replan_count}: Restructured plan to {len(updated_plan)} total steps. Reason: {decision.get('reasoning')}",
+    }
+
+    _log_terminal("Agent", f"[REPLAN] Dynamic replanning active ({replan_count}/{MAX_REVISIONS}). Total steps now: {len(updated_plan)}")
+    for s in updated_plan[current_idx + 1:]:
+        _log_terminal("Agent", f"   + Step {s['step_num']}: [{s['tool']}] {s['input'][:85]}")
+
     log_event(
         task_id=state.get("task_id"),
-        event_type="observe",
-        actor="agent_loop",
-        summary=f"Step {last_output['step_num']} completed. Proceeding to step {next_step + 1}.",
-        metadata={"decision": "continue", "next_step": next_step + 1},
+        event_type="replan",
+        actor="reasoner",
+        summary=f"Dynamic replan executed (Count: {replan_count}). Plan updated to {len(updated_plan)} steps.",
+        metadata={
+            "replan_count": replan_count,
+            "reasoning": decision.get("reasoning"),
+            "new_plan": updated_plan,
+        },
         external_calls=0,
     )
-    return {"trace": trace_entries, "current_step": next_step, "status": "executing"}
+
+    emit_sync(
+        state.get("task_id"),
+        "replan",
+        {
+            "task_id": state.get("task_id"),
+            "replan_count": replan_count,
+            "reasoning": decision.get("reasoning"),
+            "plan": updated_plan,
+        },
+    )
+
+    return {
+        "plan": updated_plan,
+        "current_step": current_idx + 1,
+        "status": "executing",
+        "replan_count": replan_count,
+        "revise_count": 0,
+        "trace": [thought],
+    }
+
+
+def clarify_node(state: AgentState) -> dict:
+    """Clarification Gate: Halts graph to request required details from the human operator."""
+    decision = state.get("observe_decision") or {}
+    question = decision.get("clarify_question") or "Could you please clarify your request?"
+
+    thought = {
+        "role": "thought",
+        "content": f"Agent paused: Requesting clarification from operator: {question}",
+    }
+    observation = {
+        "role": "observation",
+        "content": f"Awaiting operator clarification: {question}",
+    }
+
+    log_event(
+        task_id=state.get("task_id"),
+        event_type="clarify",
+        actor="reasoner",
+        summary=f"Clarification requested: {question}",
+        metadata={"question": question},
+        external_calls=0,
+    )
+
+    emit_sync(
+        state.get("task_id"),
+        "clarify",
+        {
+            "task_id": state.get("task_id"),
+            "question": question,
+        },
+    )
+
+    return {
+        "status": "clarifying",
+        "clarify_question": question,
+        "final_answer": question,
+        "trace": [thought, observation],
+        "messages": [{"role": "assistant", "content": question}],
+    }
+
+
+def revise_node(state: AgentState) -> dict:
+    """Dynamic Failure Recovery: Adapts the failing sub-task instruction with error context."""
+    idx = state["current_step"]
+    step = state["plan"][idx]
+    last = state["step_outputs"][-1]
+    revise_count = state.get("revise_count", 0)
+    tool = step["tool"]
+
+    thought = {
+        "role": "thought",
+        "content": f"Dynamically repairing Sub-Task {step['step_num']} ({tool}) (revision #{revise_count + 1}).",
+    }
+
+    if tool == "code":
+        err_msg = last.get("stderr") or last.get("output") or "Execution failure"
+        step["input"] = (
+            f"{step['input']}\n\n"
+            f"[Correction Instruction]: The previous attempt resulted in an error:\n{err_msg}\n"
+            f"Fix this bug and ensure the script executes with exit_code 0."
+        )
+    elif tool == "search":
+        step["input"] = f"{state['original_task']} (broad search)"
+    elif tool == "calc":
+        step["input"] = f"{step['input']} (extract missing numeric values from context)"
+    else:
+        step["input"] = f"{step['input']} (retry attempt)"
+
+    log_event(
+        task_id=state.get("task_id"),
+        event_type="revise",
+        actor="agent_loop",
+        summary=f"Dynamically revised Sub-Task {step['step_num']} input for {tool}.",
+        metadata={
+            "step_num": step["step_num"],
+            "tool": tool,
+            "revision": revise_count + 1,
+            "new_input": step["input"],
+        },
+        external_calls=0,
+    )
+
+    emit_sync(
+        state.get("task_id"),
+        "revise",
+        {
+            "task_id": state.get("task_id"),
+            "step_num": step["step_num"],
+            "tool": tool,
+            "revision": revise_count + 1,
+        },
+    )
+
+    return {
+        "status": "executing",
+        "revise_count": revise_count + 1,
+        "trace": [thought],
+    }
 
 
 def finalize_node(state: AgentState) -> dict:
-    role = state["routing_decision"]["model_role"]
-    model = registry.get_model(role)
+    model = registry.get_model("reasoning")
     failed = state["status"] == "failed"
     awaiting_approval = state["status"] == "awaiting_approval"
 
@@ -735,6 +1136,15 @@ def finalize_node(state: AgentState) -> dict:
             metadata={"status": "awaiting_approval", "risk": last.get("risk")},
             external_calls=0,
         )
+        emit_sync(
+            state.get("task_id"),
+            "final",
+            {
+                "task_id": state.get("task_id"),
+                "status": "awaiting_approval",
+                "final_answer": final_answer,
+            },
+        )
         return {
             "trace": [thought, observation],
             "status": "awaiting_approval",
@@ -742,25 +1152,35 @@ def finalize_node(state: AgentState) -> dict:
             "messages": [{"role": "assistant", "content": final_answer}],
         }
 
-    outputs_summary = "\n".join(
-        f"Step {o['step_num']} ({o['tool']}): {o['output']}" for o in state["step_outputs"]
-    )
-    history_section = ""
-    if state.get("history_context"):
-        history_section = f"{state['history_context']}\n"
-
-    prompt = (
-        f"{history_section}Current Task: {state['original_task']}\n\n"
-        f"Steps executed and their results:\n{outputs_summary}\n\n"
-        + ("Note: not all steps succeeded; acknowledge this and answer as best as possible.\n\n" if failed else "")
-        + "Write a clear, concise final answer for the user based on the above."
+    outputs_summary = "\n\n".join(
+        f"Sub-Task {o['step_num']} ({o['tool']}): {o['output']}" for o in state["step_outputs"]
     )
 
-    thought = {"role": "thought", "content": "Synthesizing final answer from step outputs."}
-    try:
-        final_answer = ollama.generate(model, prompt)
-    except Exception as exc:  # noqa: BLE001
-        final_answer = f"[error] Could not synthesize final answer: {exc}"
+    if len(state["step_outputs"]) == 1 and state["step_outputs"][0]["tool"] in ("search", "document", "calc"):
+        final_answer = state["step_outputs"][0]["output"]
+        thought = {"role": "thought", "content": "Sub-task completed directly with verified tool output."}
+    else:
+        history_section = ""
+        if state.get("history_context"):
+            history_section = f"{state['history_context']}\n"
+
+        prompt = (
+            f"{history_section}User's Original Request: {state['original_task']}\n\n"
+            f"Sub-tasks executed and results:\n{outputs_summary}\n\n"
+            + ("Note: not all steps succeeded; acknowledge this and answer as best as possible.\n\n" if failed else "")
+            + "Write a clear, concise, professional final answer for the operator addressing the request."
+        )
+
+        thought = {"role": "thought", "content": "Synthesizing cohesive final answer from all sub-task results."}
+        _log_terminal("Finalizer", f"[SYNTH] Synthesizing final answer using model '{model}'...")
+        try:
+            final_answer = ollama.generate(model, prompt)
+            if not final_answer.strip():
+                _log_terminal("Finalizer", f"[WARN] Model '{model}' returned empty synthesis. Falling back to step output summary.")
+                final_answer = f"Task completed. Here is a summary of what was done:\n\n{outputs_summary}"
+        except Exception as exc:
+            _log_terminal("Finalizer", f"[ERROR] Synthesis LLM call failed: {exc}. Using step output summary as answer.")
+            final_answer = f"Task completed. Here is a summary of what was done:\n\n{outputs_summary}"
 
     observation = {"role": "observation", "content": f"Final answer: {final_answer[:300]}"}
 
@@ -783,11 +1203,21 @@ def finalize_node(state: AgentState) -> dict:
             external_calls=0,
         )
 
+    emit_sync(
+        state.get("task_id"),
+        "final",
+        {
+            "task_id": state.get("task_id"),
+            "status": "failed" if failed else "complete",
+            "final_answer": final_answer,
+        },
+    )
+
     return {
         "trace": [thought, observation],
         "status": "failed" if failed else "complete",
         "final_answer": final_answer,
-        "messages": [{"role": "user", "content": prompt}, {"role": "assistant", "content": final_answer}],
+        "messages": [{"role": "user", "content": state["original_task"]}, {"role": "assistant", "content": final_answer}],
     }
 
 
@@ -795,33 +1225,40 @@ def route_after_observe(state: AgentState) -> str:
     return state["status"]
 
 
-# ---------------------------------------------------------------------------
-# Graph assembly
-# ---------------------------------------------------------------------------
-
 def build_graph():
     graph = StateGraph(AgentState)
-    graph.add_node("plan", plan_node)
+    graph.add_node("master_plan", master_plan_node)
+    graph.add_node("route_subtask", route_subtask_node)
     graph.add_node("execute", execute_node)
     graph.add_node("observe", observe_node)
+    graph.add_node("replan", replan_node)
+    graph.add_node("clarify", clarify_node)
+    graph.add_node("revise", revise_node)
     graph.add_node("finalize", finalize_node)
 
-    graph.set_entry_point("plan")
-    graph.add_edge("plan", "execute")
+    graph.set_entry_point("master_plan")
+    graph.add_edge("master_plan", "route_subtask")
+    graph.add_edge("route_subtask", "execute")
     graph.add_edge("execute", "observe")
     graph.add_conditional_edges(
         "observe",
         route_after_observe,
         {
-            "executing": "execute",
-            "revising": "plan",
+            "executing": "route_subtask",
+            "replan": "replan",
+            "revising": "revise",
+            "clarifying": "clarify",
             "complete": "finalize",
             "failed": "finalize",
             "awaiting_approval": "finalize",
         },
     )
+    graph.add_edge("replan", "route_subtask")
+    graph.add_edge("clarify", END)
+    graph.add_edge("revise", "execute")
     graph.add_edge("finalize", END)
     return graph.compile()
+
 
 
 _COMPILED_GRAPH = build_graph()
@@ -832,77 +1269,64 @@ def run_agent(
     attachment_type: Optional[str] = None,
     task_id: Optional[str] = None,
     history: Optional[List[dict]] = None,
+    initial_key_facts: Optional[Dict[str, Any]] = None,
+    resume_state: Optional[AgentState] = None,
 ) -> dict:
     if not task_id:
         task_id = str(uuid.uuid4())
 
+    _log_terminal("Agent", f"[START] Task received [ID: {task_id[:8]}]: '{task[:85]}'")
+
     history_ctx = _format_history(history)
 
-    has_img_signal = bool(
-        attachment_type in ("image", "photo", "picture", "file")
-        or any(ext in (task or "").lower() for ext in (".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".webp"))
-    )
-    logger.info(f"[ROUTER] Message has attachment: {has_img_signal} (attachment_type={attachment_type})")
-
-    routing_decision = route(task, attachment_type=attachment_type)
-    model_role = routing_decision.model_role
-    model_tag = registry.get_model(model_role)
-
-    logger.info(f"[ROUTER] Selected task_type='{routing_decision.task_type}', model_role='{model_role}' ({model_tag})")
-    if has_img_signal and routing_decision.task_type != "vision":
-        logger.warning(f"[ROUTER] MISROUTE - image detected but routed to {routing_decision.task_type}")
-
-    log_event(
-        task_id=task_id,
-        event_type="route",
-        actor="router",
-        summary=f"Routed to task_type='{routing_decision.task_type}', model_role='{model_role}' ({model_tag})",
-        metadata={
-            "task": task,
-            "task_type": routing_decision.task_type,
-            "model_role": model_role,
-            "model_tag": model_tag,
-            "tools_needed": routing_decision.tools_needed,
-            "reason": routing_decision.reason,
-        },
-        external_calls=0,
-    )
-
-    initial_state: AgentState = {
-        "task_id": task_id,
-        "original_task": task,
-        "routing_decision": routing_decision.model_dump(),
-        "plan": [],
-        "current_step": 0,
-        "step_outputs": [],
-        "messages": [],
-        "status": "planning",
-        "trace": [
-            {
-                "role": "thought",
-                "content": (
-                    f"Routed to task_type='{routing_decision.task_type}', "
-                    f"model_role='{routing_decision.model_role}'. Reason: {routing_decision.reason}"
-                ),
-            }
-        ],
-        "revise_count": 0,
-        "final_answer": None,
-        "history_context": history_ctx,
-    }
-
+    if resume_state:
+        initial_state = dict(resume_state)
+        initial_state["task_id"] = task_id
+        if task:
+            initial_state["original_task"] = task
+    else:
+        initial_state: AgentState = {
+            "task_id": task_id,
+            "original_task": task,
+            "attachment_type": attachment_type,
+            "routing_decision": None,
+            "plan": [],
+            "current_step": 0,
+            "step_outputs": [],
+            "messages": [],
+            "status": "planning",
+            "trace": [
+                {
+                    "role": "thought",
+                    "content": f"Master Planner activated for request: {task[:100]}",
+                }
+            ],
+            "revise_count": 0,
+            "replan_count": 0,
+            "final_answer": None,
+            "history_context": history_ctx,
+            "shared_memory": "",
+            "key_facts": dict(initial_key_facts or {}),
+            "observe_decision": None,
+            "clarify_question": None,
+        }
 
     final_state = _COMPILED_GRAPH.invoke(initial_state, config={"recursion_limit": 60})
 
-    model_used = registry.get_model(final_state["routing_decision"]["model_role"])
+    primary_role = (
+        final_state.get("routing_decision", {}).get("model_role")
+        if final_state.get("routing_decision")
+        else "reasoning"
+    )
+    model_used = registry.get_model(primary_role)
 
     sources_used: List[dict] = []
     generated_files: List[dict] = []
-    code_runs: List[dict] = []
+    raw_code_runs: List[dict] = []
     approval_info = None
     draft_content = None
 
-    for step_output in final_state["step_outputs"]:
+    for step_output in final_state.get("step_outputs", []):
         if "sources" in step_output and step_output["sources"]:
             sources_used.extend(step_output["sources"])
         if step_output.get("awaiting_approval"):
@@ -921,7 +1345,7 @@ def run_agent(
                 "sources": step_output.get("sources", []),
             })
         if step_output.get("tool") == "code":
-            code_runs.append({
+            raw_code_runs.append({
                 "step_num": step_output["step_num"],
                 "language": step_output.get("language", "python"),
                 "code": step_output.get("code"),
@@ -933,22 +1357,68 @@ def run_agent(
                 "error": step_output.get("error"),
             })
 
+    # Consolidate code runs per sub-task: present the latest run as primary,
+    # with prior attempts embedded as revisions so the frontend doesn't stack multiple redundant cards.
+    runs_by_step: Dict[int, List[dict]] = {}
+    for r in raw_code_runs:
+        runs_by_step.setdefault(r.get("step_num", 1), []).append(r)
+
+    code_runs: List[dict] = []
+    for s_num, runs in runs_by_step.items():
+        latest = dict(runs[-1])
+        latest["attempt_count"] = len(runs)
+        if len(runs) > 1:
+            latest["revisions"] = runs[:-1]
+        code_runs.append(latest)
+
+    routing_decision = final_state.get("routing_decision") or {
+        "task_type": "general",
+        "model_role": "reasoning",
+        "tools_needed": [],
+        "reason": "Master planner orchestrator",
+    }
+
+    # Collect distinct models engaged across steps in execution order:
+    models_used: List[str] = []
+    for step in final_state.get("plan", []):
+        m = step.get("model")
+        if m and m not in models_used and not m.endswith("_tool") and m != "vault_search":
+            models_used.append(m)
+    for so in final_state.get("step_outputs", []):
+        m = so.get("model")
+        if m and m not in models_used and not m.endswith("_tool") and m != "vault_search":
+            models_used.append(m)
+    if model_used and model_used not in models_used:
+        models_used.append(model_used)
+
+    _log_terminal(
+        "Agent",
+        f"[COMPLETE] Task complete [ID: {task_id[:8]}]. Models engaged: {' -> '.join(models_used) if models_used else model_used}",
+    )
+
     result_payload = {
         "task_id": task_id,
         "task": task,
-        "routing_decision": final_state["routing_decision"],
-        "plan": final_state["plan"],
-        "trace": final_state["trace"],
-        "step_outputs": final_state["step_outputs"],
-        "result": final_state["final_answer"],
+        "routing_decision": routing_decision,
+        "plan": final_state.get("plan", []),
+        "trace": final_state.get("trace", []),
+        "step_outputs": final_state.get("step_outputs", []),
+        "result": final_state.get("final_answer"),
         "sources": sources_used,
         "generated_files": generated_files,
         "code_runs": code_runs,
-        "status": final_state["status"],
+        "status": final_state.get("status"),
         "model_used": model_used,
+        "models_used": models_used,
+        "key_facts": final_state.get("key_facts", {}),
+        "clarify_question": final_state.get("clarify_question"),
+        "observe_decision": final_state.get("observe_decision"),
+        "state_snapshot": final_state,
     }
     if approval_info:
         result_payload["approval"] = approval_info
         result_payload["draft_content"] = draft_content
 
     return result_payload
+
+

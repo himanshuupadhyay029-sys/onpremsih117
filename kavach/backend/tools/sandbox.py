@@ -120,6 +120,12 @@ def inspect_docker_status() -> Tuple[str, str]:
         return "ERROR", f"Unexpected error checking Docker status: {exc}"
 
 
+def _docker_available() -> bool:
+    """Returns True if the Docker daemon is healthy and running."""
+    status, _ = inspect_docker_status()
+    return status == "HEALTHY"
+
+
 def auto_recover_docker(max_wait_seconds: int = 40) -> bool:
     """Attempts to auto-launch Docker Desktop on Windows and polls until ready."""
     _log_terminal("Attempting auto-recovery: searching for Docker Desktop executable...")
@@ -197,6 +203,7 @@ def run_code(
     language: str = "python",
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
     task_id: Optional[str] = None,
+    user_stdin: Optional[str] = None,
 ) -> Dict:
     """Writes `code` to a temp file, runs it inside a locked-down, network-isolated
     Docker container with strict resource limits, and returns the captured result.
@@ -313,6 +320,7 @@ def run_code(
         # -v ...:ro: read-only file mount
         cmd = [
             "docker", "run",
+            "-i",
             "--rm",
             "--name", container_name,
             "--network", "none",
@@ -323,10 +331,16 @@ def run_code(
         ] + cmd_exec
 
         _log_terminal(f"Spawning isolated container '{container_name}' (image={image_name}, network=none)...")
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        proc = subprocess.Popen(
+            cmd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
 
         try:
-            stdout, stderr = proc.communicate(timeout=timeout_seconds)
+            stdout, stderr = proc.communicate(input=user_stdin, timeout=timeout_seconds)
             exit_code = proc.returncode
         except subprocess.TimeoutExpired:
             _log_terminal(f"Container '{container_name}' exceeded {timeout_seconds}s timeout! Killing...")

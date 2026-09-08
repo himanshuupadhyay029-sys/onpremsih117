@@ -1,6 +1,6 @@
 {
-  "reasoning": "qwen2.5:3b-instruct",
+  "reasoning": "qwen2.5:7b-instruct",
   "code": "qwen2.5-coder:3b",
   "vision": "qwen2.5vl:3b",
-  "embedding": "nomic-embed-text"
+  "embedding": "nomic-embed-text:latest"
 }

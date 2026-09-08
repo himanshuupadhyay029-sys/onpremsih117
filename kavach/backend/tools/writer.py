@@ -23,6 +23,12 @@ from backend import config
 from backend.audit.logbook import log_event
 from backend.engine import ollama, registry
 
+
+def _log_terminal(msg: str) -> None:
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    print(f"[{now_str}] [DocWriter] {msg}", flush=True)
+
+
 DRAFT_PROMPT_TEMPLATE = """You are a technical documentation writer. Based on the topic, context, and sources below, generate a clean, structured JSON outline for a formal document.
 
 Topic / Content:
@@ -141,9 +147,11 @@ def draft_document(
     topic_or_content: str,
     sources: Optional[List[Union[str, Dict[str, Any]]]] = None,
     is_grounded: bool = True,
+    model: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Asks the reasoning specialist model to draft structured document JSON."""
-    reasoning_model = registry.get_model("reasoning")
+    reasoning_model = model or registry.get_model("reasoning")
+    _log_terminal(f"Drafting structured document outline using model '{reasoning_model}'...")
 
     # Format sources block
     source_filenames: List[str] = []
@@ -192,6 +200,7 @@ def draft_document(
         default_sources=source_filenames if is_grounded else [],
         is_grounded=is_grounded,
     )
+    _log_terminal(f"Document draft parsed: title='{structured.get('title')}', sections={len(structured.get('sections', []))}")
 
     return structured
 
@@ -201,8 +210,10 @@ def render_docx(structured_content: Dict[str, Any]) -> Path:
     title = structured_content.get("title", "Technical Note").strip()
     sections = structured_content.get("sections", [])
     sources = structured_content.get("sources", [])
+    _log_terminal(f"Rendering docx for '{title}' to {config.OUTPUTS_DIR}...")
 
     doc = docx.Document()
+
 
     # Set page margins
     sections_doc = doc.sections

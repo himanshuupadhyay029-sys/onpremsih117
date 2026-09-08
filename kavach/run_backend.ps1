@@ -23,7 +23,7 @@ if (Test-Path $venvActivate) {
 }
 
 # 3. Check and Wait for Postgres Container Health
-Write-Host "[INFO] Checking PostgreSQL status on localhost:5433..." -ForegroundColor Cyan
+Write-Host "[INFO] Checking PostgreSQL status on localhost:5434..." -ForegroundColor Cyan
 $maxAttempts = 30
 $attempt = 0
 $dbReady = $false
@@ -32,7 +32,7 @@ while (-not $dbReady -and $attempt -lt $maxAttempts) {
     $attempt++
     try {
         $tcpClient = New-Object System.Net.Sockets.TcpClient
-        $connectTask = $tcpClient.ConnectAsync("127.0.0.1", 5433)
+        $connectTask = $tcpClient.ConnectAsync("127.0.0.1", 5434)
         if ($connectTask.Wait(1000) -and $tcpClient.Connected) {
             $tcpClient.Close()
             $dbReady = $true
@@ -42,16 +42,17 @@ while (-not $dbReady -and $attempt -lt $maxAttempts) {
     } catch {
         # ignore connection error while polling
     }
-    Write-Host "  Attempt $attempt/${maxAttempts}: Waiting for PostgreSQL container on port 5433..." -ForegroundColor DarkGray
+    Write-Host "  Attempt $attempt/${maxAttempts}: Waiting for PostgreSQL container on port 5434..." -ForegroundColor DarkGray
     Start-Sleep -Seconds 1
 }
 
 if (-not $dbReady) {
-    Write-Host "[ERROR] PostgreSQL not reachable at 127.0.0.1:5433." -ForegroundColor Red
+    Write-Host "[ERROR] PostgreSQL not reachable at 127.0.0.1:5434." -ForegroundColor Red
     Write-Host "        Please make sure Docker is running and execute: docker compose up -d postgres" -ForegroundColor Yellow
     exit 1
 }
 Write-Host "[OK] PostgreSQL is reachable and ready." -ForegroundColor Green
+
 
 # 4. Run Alembic Database Migrations
 Write-Host "[INFO] Applying database migrations (alembic upgrade head)..." -ForegroundColor Cyan

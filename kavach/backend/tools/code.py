@@ -24,6 +24,7 @@ GENERATE_PROMPTS = {
 Requirements:
 - Return ONLY the raw Python code. No markdown code fences, no explanation, no comments about what you are doing.
 - The script must run standalone with `python script.py` and print its result(s) to stdout.
+- If interactive user input is needed, try to read from input() but always handle EOFError or empty input with sensible default test values so the script executes reliably.
 - Use only the Python standard library — the execution sandbox has no network access, so third-party packages cannot be installed.
 """,
     "javascript": """Write a complete, self-contained Node.js / JavaScript script that accomplishes the following task:
@@ -61,6 +62,7 @@ Fix the specific problem shown in that error and write a corrected, complete scr
 Requirements:
 - Return ONLY the raw Python code. No markdown code fences, no explanation.
 - The script must run standalone with `python script.py` and print its result(s) to stdout.
+- If the error was an EOFError or empty input, ensure input() has a try-except fallback to sensible default values.
 - Use only the Python standard library — no network access is available to install packages.
 """,
     "javascript": """Write a complete, self-contained Node.js / JavaScript script that accomplishes the following task:
@@ -162,15 +164,22 @@ def write_and_run(
     prior_error: Optional[str] = None,
     timeout_seconds: int = 15,
     task_id: Optional[str] = None,
+    user_stdin: Optional[str] = None,
 ) -> Dict:
     """Generates code in the detected or specified language (fixing prior_error if given)
     and executes it in the network-isolated Docker sandbox.
     """
     lang = language or detect_language(task_description)
-    _log_terminal(f"write_and_run invoked: language='{lang}'")
+    _log_terminal(f"write_and_run invoked: language='{lang}', has_stdin={bool(user_stdin)}")
 
     code = generate_code(task_description, language=lang, prior_error=prior_error)
-    sandbox_result = run_code(code, language=lang, timeout_seconds=timeout_seconds, task_id=task_id)
+    sandbox_result = run_code(
+        code,
+        language=lang,
+        timeout_seconds=timeout_seconds,
+        task_id=task_id,
+        user_stdin=user_stdin,
+    )
 
     return {
         "language": lang,

@@ -4,6 +4,7 @@ import TopBar from './components/TopBar';
 import NewTaskScreen from './components/NewTaskScreen';
 import KnowledgeVaultScreen from './components/KnowledgeVaultScreen';
 import AuditLogScreen from './components/AuditLogScreen';
+import ModelSettingsScreen from './components/ModelSettingsScreen';
 import AuthModal from './components/AuthModal';
 
 const API_BASE = '';
@@ -145,6 +146,7 @@ export default function App() {
           )}
           {activeScreen === 'vault' && <KnowledgeVaultScreen />}
           {activeScreen === 'audit' && <AuditLogScreen />}
+          {activeScreen === 'models' && <ModelSettingsScreen />}
         </div>
       </main>
 

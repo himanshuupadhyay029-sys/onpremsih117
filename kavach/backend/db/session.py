@@ -6,7 +6,7 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 
 DATABASE_URL = os.environ.get(
     "DATABASE_URL",
-    "postgresql://kavach:kavach_secret@127.0.0.1:5433/kavach_db",
+    "postgresql://kavach:kavach_secret@127.0.0.1:5434/kavach_db",
 )
 
 engine = create_engine(

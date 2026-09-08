@@ -29,6 +29,9 @@ frontend-react/node_modules/
 .vite/
 frontend-react/node_modules/.vite/
 *.local
+.env
+.env.*
+.env.local
 
 # Uploaded test files & runtime documents
 knowledge/uploads/

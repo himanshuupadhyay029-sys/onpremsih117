@@ -31,11 +31,13 @@ class Chat(Base):
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
     title = Column(String(255), default="New Chat", nullable=False)
     chat_type = Column(String(50), default="general", nullable=False)
+    agent_memory = Column(JSONB, default=dict, server_default='{}', nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     user = relationship("User", back_populates="chats")
     messages = relationship("Message", back_populates="chat", cascade="all, delete-orphan", order_by="Message.created_at")
+    runs = relationship("AgentRun", back_populates="chat", cascade="all, delete-orphan", order_by="AgentRun.created_at")
 
 
 class Message(Base):
@@ -49,3 +51,17 @@ class Message(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     chat = relationship("Chat", back_populates="messages")
+
+
+class AgentRun(Base):
+    __tablename__ = "agent_runs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    chat_id = Column(UUID(as_uuid=True), ForeignKey("chats.id", ondelete="CASCADE"), index=True, nullable=True)
+    task_id = Column(String(255), unique=True, index=True, nullable=False)
+    status = Column(String(50), default="running", nullable=False)
+    state_snapshot = Column(JSONB, default=dict, server_default='{}', nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    chat = relationship("Chat", back_populates="runs")

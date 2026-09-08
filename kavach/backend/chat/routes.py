@@ -48,6 +48,7 @@ class ChatResponse(BaseModel):
     created_at: str
     updated_at: str
     message_count: Optional[int] = 0
+    agent_memory: Optional[Dict[str, Any]] = None
 
     class Config:
         from_attributes = True
@@ -87,6 +88,7 @@ def create_chat(
         created_at=chat.created_at.isoformat(),
         updated_at=chat.updated_at.isoformat(),
         message_count=0,
+        agent_memory=chat.agent_memory or {},
     )
 
 
@@ -114,6 +116,7 @@ def list_chats(
                 created_at=c.created_at.isoformat(),
                 updated_at=c.updated_at.isoformat(),
                 message_count=len(c.messages),
+                agent_memory=c.agent_memory or {},
             )
         )
     return result
@@ -143,6 +146,7 @@ def get_chat(
         created_at=chat.created_at.isoformat(),
         updated_at=chat.updated_at.isoformat(),
         message_count=len(chat.messages),
+        agent_memory=chat.agent_memory or {},
     )
 
 
