@@ -94,9 +94,9 @@ Make sure the Ollama service is running (`ollama serve` or Ollama background ico
 KAVACH maps specific models to task roles in `backend/models.json`:
 ```json
 {
-  "reasoning": "qwen2.5:7b-instruct",
-  "code": "qwen2.5-coder:3b",
-  "vision": "qwen2.5vl:3b",
+  "reasoning": "gemma3:4b",
+  "code": "granite4.1:3b",
+  "vision": "gemma3:4b",
   "embedding": "nomic-embed-text:latest"
 }
 ```
@@ -107,17 +107,14 @@ Pull the required models in your terminal:
 ollama pull nomic-embed-text:latest
 
 # 2. Specialist Code Model (Fast, accurate code generation)
-ollama pull qwen2.5-coder:3b
+ollama pull granite4.1:3b
 
-# 3. Primary Reasoning / Document Model (Decomposer & Writer)
-ollama pull qwen2.5:7b-instruct
-
-# 4. Multimodal Vision Model (For diagrams, schematics & photos)
-ollama pull qwen2.5vl:3b
+# 3. Reasoning & Vision Model (Planning, Chat, Synthesis, Document & Vision)
+ollama pull gemma3:4b
 ```
 
-> **💡 Low VRAM / CPU-Only Machines:**
-> If your machine has limited VRAM (less than 8GB), you can switch `reasoning` in `backend/models.json` to `qwen2.5:3b` or use 4-bit quantizations (e.g. `qwen2.5:7b-instruct-q4_K_M`).
+> **💡 Flexible Models & Quantizations:**
+> You can change any role assignment in `backend/models.json` or live from the Model Settings screen in the operator console.
 
 ---
 
@@ -213,21 +210,21 @@ Open your browser and navigate to:
 - When you send a compound query (e.g. *"Write a python code to calculate 50*10 and then create a document for this code"*):
   1. The **Master Planner** decomposes the request into ordered sub-tasks: `[code]` then `[document]`.
   2. The **Router** switches the active model dynamically:
-     - Step 1 routes to `qwen2.5-coder:3b` (role: `code`).
-     - Step 2 routes to `qwen2.5:7b-instruct` (role: `reasoning`).
+     - Step 1 routes to `granite4.1:3b` (role: `code`).
+     - Step 2 routes to `gemma3:4b` (role: `reasoning`).
   3. **Terminal Logging**: Your terminal will print real-time events:
      ```text
      [Planner] [OK] Master Plan established (2 sub-task(s)):
         * Step 1: [code] Write Python script...
         * Step 2: [document] Create formal document...
-     [Router] [SWITCH] Step 1/2: Routing to 'code' | Active model switched to 'qwen2.5-coder:3b' (code)
-     [Executor] [RUN] Executing Sub-Task 1/2 [code] with model 'qwen2.5-coder:3b'...
-     [Router] [SWITCH] Step 2/2: Routing to 'document' | Active model switched to 'qwen2.5:7b-instruct' (reasoning)
-     [Agent] [COMPLETE] Task complete. Models engaged: qwen2.5-coder:3b -> qwen2.5:7b-instruct
+     [Router] [SWITCH] Step 1/2: Routing to 'code' | Active model switched to 'granite4.1:3b' (code)
+     [Executor] [RUN] Executing Sub-Task 1/2 [code] with model 'granite4.1:3b'...
+     [Router] [SWITCH] Step 2/2: Routing to 'document' | Active model switched to 'gemma3:4b' (reasoning)
+     [Agent] [COMPLETE] Task complete. Models engaged: granite4.1:3b -> gemma3:4b
      ```
   4. **Frontend Visibility**:
-     - The message header shows: `Models · qwen2.5-coder:3b → qwen2.5:7b-instruct`.
-     - Each step row displays an active model chip badge (`qwen2.5-coder:3b` or `qwen2.5:7b-instruct`).
+     - The message header shows: `Models · granite4.1:3b → gemma3:4b`.
+     - Each step row displays an active model chip badge (`granite4.1:3b` or `gemma3:4b`).
 
 ### 2. Interactive Docker Code Sandbox
 - The generated code block provides:

@@ -1,3 +1,3 @@
-from backend.engine import ollama, registry
+from backend.engine import ollama, prompts, registry
 
-__all__ = ["ollama", "registry"]
+__all__ = ["ollama", "prompts", "registry"]

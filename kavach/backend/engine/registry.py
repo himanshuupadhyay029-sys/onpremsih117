@@ -39,18 +39,18 @@ def get_model(role: str) -> str:
 
     # Smart fallback heuristics
     if role == "reasoning":
-        instructs = [m for m in installed if "instruct" in m.lower() or "chat" in m.lower()]
+        instructs = [m for m in installed if "instruct" in m.lower() or "chat" in m.lower() or "gemma" in m.lower()]
         return instructs[0] if instructs else installed[0]
     elif role == "code":
-        coders = [m for m in installed if "code" in m.lower() or "coder" in m.lower()]
+        coders = [m for m in installed if "code" in m.lower() or "coder" in m.lower() or "granite" in m.lower()]
         if coders: return coders[0]
-        instructs = [m for m in installed if "instruct" in m.lower() or "chat" in m.lower()]
+        instructs = [m for m in installed if "instruct" in m.lower() or "chat" in m.lower() or "gemma" in m.lower()]
         return instructs[0] if instructs else installed[0]
     elif role == "embedding":
-        embeds = [m for m in installed if "embed" in m.lower()]
+        embeds = [m for m in installed if "embed" in m.lower() or "nomic" in m.lower()]
         return embeds[0] if embeds else installed[0]
     elif role == "vision":
-        visions = [m for m in installed if "vl" in m.lower() or "vision" in m.lower() or "moondream" in m.lower() or "llava" in m.lower()]
+        visions = [m for m in installed if "vl" in m.lower() or "vision" in m.lower() or "moondream" in m.lower() or "llava" in m.lower() or "gemma" in m.lower()]
         return visions[0] if visions else installed[0]
 
     return installed[0]

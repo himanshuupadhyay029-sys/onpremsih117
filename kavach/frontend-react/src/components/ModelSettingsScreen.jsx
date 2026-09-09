@@ -334,7 +334,7 @@ export default function ModelSettingsScreen() {
             <input 
               type="text" 
               className="input-field model-input" 
-              placeholder="Type model name (e.g., llama3, qwen2.5, mistral, deepseek-r1)..." 
+              placeholder="Type model name (e.g., gemma3, granite4.1, llama3, mistral)..." 
               value={pullModelName}
               onChange={(e) => setPullModelName(e.target.value)}
               disabled={isPulling}

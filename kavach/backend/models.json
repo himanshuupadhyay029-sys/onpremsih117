@@ -1,6 +1,6 @@
 {
   "reasoning": "gemma3:4b",
-  "code": "ibm/granite4.1:3b",
-  "vision": "qwen2.5vl:3b",
+  "code": "granite4.1:3b",
+  "vision": "gemma3:4b",
   "embedding": "nomic-embed-text:latest"
 }
