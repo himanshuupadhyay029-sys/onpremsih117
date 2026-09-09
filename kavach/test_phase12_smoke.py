@@ -27,7 +27,7 @@ except Exception as exc:
     print("  Stopping test as requested.")
     sys.exit(1)
 
-required_models = ["qwen2.5:3b-instruct", "qwen2.5-coder:3b", "nomic-embed-text"]
+required_models = ["gemma3:4b", "granite4.1:3b", "nomic-embed-text"]
 missing_models = [req for req in required_models if not any(req in m for m in installed_models)]
 if missing_models:
     print(f"  [ERROR] Missing required model(s): {missing_models}")

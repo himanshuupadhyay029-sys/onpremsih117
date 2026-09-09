@@ -7,6 +7,7 @@ from typing import Any, AsyncGenerator, Dict, List, Optional, Union
 import httpx
 
 from backend import config
+from backend.engine.prompts import CODING_SYSTEM_PROMPT, REASONING_SYSTEM_PROMPT, VISION_SYSTEM_PROMPT
 
 
 class OllamaError(RuntimeError):
@@ -24,14 +25,28 @@ def _get_client(timeout: float = 120.0) -> httpx.Client:
 
 
 def generate(model: str, prompt: str, system: Optional[str] = None) -> str:
-    """Generates completion text from a local Ollama model without streaming."""
+    """Generates completion text from a local Ollama model without streaming.
+    - If system is explicitly provided, it is used.
+    - If model is a coding specialist (e.g. granite / coder), CODING_SYSTEM_PROMPT is used.
+    - For general reasoning, chat, planning, and synthesis (e.g. gemma3:4b), REASONING_SYSTEM_PROMPT
+      grounds the model in KAVACH's sovereign on-premise identity and capabilities.
+    """
+    if system is not None:
+        active_system = system
+    else:
+        m_lower = model.lower()
+        if "granite" in m_lower or "code" in m_lower or "coder" in m_lower:
+            active_system = CODING_SYSTEM_PROMPT
+        else:
+            active_system = REASONING_SYSTEM_PROMPT
+
     payload: Dict[str, Any] = {
         "model": model,
         "prompt": prompt,
         "stream": False,
     }
-    if system:
-        payload["system"] = system
+    if active_system:
+        payload["system"] = active_system
 
     try:
         with _get_client(timeout=120.0) as client:
@@ -81,8 +96,46 @@ def embed(model: str, text: str) -> List[float]:
         raise OllamaError(f"Ollama embedding failed: {exc}") from exc
 
 
+<<<<<<< Updated upstream
 def vision(model: str, prompt: str, image_path: Union[str, Path]) -> str:
+=======
+def embed_batch(model: str, texts: List[str]) -> List[List[float]]:
+    """Generates vector embeddings for multiple texts.
+    Attempts modern Ollama /api/embed batch endpoint first, falling back to sequential /api/embeddings.
+    """
+    if not texts:
+        return []
+
+    # Modern Ollama batch API endpoint: /api/embed with input: [list of strings]
+    batch_payload: Dict[str, Any] = {
+        "model": model,
+        "input": texts,
+    }
+    try:
+        with _get_client(timeout=180.0) as client:
+            resp = client.post("/api/embed", json=batch_payload)
+            if resp.status_code == 200:
+                data = resp.json()
+                embeddings = data.get("embeddings")
+                if embeddings and len(embeddings) == len(texts):
+                    return embeddings
+    except httpx.ConnectError as exc:
+        raise OllamaError(
+            f"Cannot connect to local Ollama at {config.OLLAMA_BASE_URL}. "
+            "Please ensure Ollama is running (`ollama serve`)."
+        ) from exc
+    except Exception:
+        # Fallback to single-chunk embedding if /api/embed fails or endpoint not present
+        pass
+
+    return [embed(model, t) for t in texts]
+
+
+
+def vision(model: str, prompt: str, image_path: Union[str, Path], system: Optional[str] = None) -> str:
+>>>>>>> Stashed changes
     """Performs multimodal visual analysis on an image file using a local vision model."""
+    active_system = system if system is not None else VISION_SYSTEM_PROMPT
     img_p = Path(image_path)
     if not img_p.exists():
         raise FileNotFoundError(f"Image not found at path: {image_path}")
@@ -96,6 +149,8 @@ def vision(model: str, prompt: str, image_path: Union[str, Path]) -> str:
         "images": [img_b64],
         "stream": False,
     }
+    if active_system:
+        payload["system"] = active_system
     try:
         with _get_client(timeout=180.0) as client:
             resp = client.post("/api/generate", json=payload)

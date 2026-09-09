@@ -1,6 +1,6 @@
 """code.py — code GENERATION (kept separate from execution in sandbox.py).
 
-generate_code() asks the CODE model role (qwen2.5-coder:3b via the existing
+generate_code() asks the CODE model role (granite4.1:3b via the existing
 registry/ollama engine) for a self-contained script in the detected or specified
 language (Python, JavaScript/Node, or C), stripping any markdown fences defensively.
 
@@ -14,6 +14,7 @@ import re
 from typing import Dict, Optional
 
 from backend.engine import ollama, registry
+from backend.engine.prompts import CODING_SYSTEM_PROMPT
 from backend.tools.sandbox import run_code
 
 GENERATE_PROMPTS = {
@@ -152,7 +153,7 @@ def generate_code(
         template = GENERATE_PROMPTS.get(lang, GENERATE_PROMPTS["python"])
         prompt = template.format(task_description=task_description)
 
-    raw = ollama.generate(model, prompt)
+    raw = ollama.generate(model, prompt, system=CODING_SYSTEM_PROMPT)
     code = _strip_code_fences(raw)
     _log_terminal(f"Generated {len(code)} characters of {lang} source code.")
     return code
