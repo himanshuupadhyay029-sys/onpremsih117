@@ -65,7 +65,7 @@ def embed(model: str, text: str) -> List[float]:
         "prompt": text,
     }
     try:
-        with _get_client(timeout=30.0) as client:
+        with _get_client(timeout=120.0) as client:
             resp = client.post("/api/embeddings", json=payload)
             resp.raise_for_status()
             data = resp.json()
@@ -79,6 +79,39 @@ def embed(model: str, text: str) -> List[float]:
         raise OllamaError(f"Ollama returned HTTP error: {exc.response.status_code} - {exc.response.text}") from exc
     except Exception as exc:
         raise OllamaError(f"Ollama embedding failed: {exc}") from exc
+
+
+def embed_batch(model: str, texts: List[str]) -> List[List[float]]:
+    """Generates vector embeddings for multiple texts.
+    Attempts modern Ollama /api/embed batch endpoint first, falling back to sequential /api/embeddings.
+    """
+    if not texts:
+        return []
+
+    # Modern Ollama batch API endpoint: /api/embed with input: [list of strings]
+    batch_payload: Dict[str, Any] = {
+        "model": model,
+        "input": texts,
+    }
+    try:
+        with _get_client(timeout=180.0) as client:
+            resp = client.post("/api/embed", json=batch_payload)
+            if resp.status_code == 200:
+                data = resp.json()
+                embeddings = data.get("embeddings")
+                if embeddings and len(embeddings) == len(texts):
+                    return embeddings
+    except httpx.ConnectError as exc:
+        raise OllamaError(
+            f"Cannot connect to local Ollama at {config.OLLAMA_BASE_URL}. "
+            "Please ensure Ollama is running (`ollama serve`)."
+        ) from exc
+    except Exception:
+        # Fallback to single-chunk embedding if /api/embed fails or endpoint not present
+        pass
+
+    return [embed(model, t) for t in texts]
+
 
 
 def vision(model: str, prompt: str, image_path: Union[str, Path]) -> str:

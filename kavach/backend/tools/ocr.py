@@ -101,10 +101,14 @@ def run_ocr(image_path: Union[str, Path]) -> Dict[str, Any]:
     result = _run_tesseract_ocr(p)
 
     if result is None:
-        raise RuntimeError(
-            "No OCR engine available. Please install Tesseract (`pip install pytesseract` "
-            "+ Tesseract binary from https://github.com/UB-Mannheim/tesseract/wiki)."
-        )
+        return {
+            "text": "",
+            "confidence": 0.0,
+            "engine": "unavailable",
+            "low_confidence": True,
+            "word_boxes": [],
+            "file_path": str(p),
+        }
 
     confidence = result.get("confidence", 0.0)
     low_conf = confidence < LOW_CONFIDENCE_THRESHOLD
@@ -152,10 +156,60 @@ def extract_text(file_path: Union[str, Path], task_id: Optional[str] = None) -> 
                     "low_confidence": False,
                     "file_path": str(p),
                 }
-        except Exception:
-            pass
 
-    # Image-based path or scanned PDF
+            # Scanned PDF: extract embedded page images and run OCR on them
+            import io
+            from PIL import Image
+            pdf_images_text = []
+            avg_confs = []
+            for page in reader.pages:
+                for img_obj in getattr(page, "images", []):
+                    try:
+                        pil_img = Image.open(io.BytesIO(img_obj.data))
+                        img_res = _run_tesseract_ocr(pil_img)
+                        if img_res and img_res.get("text"):
+                            pdf_images_text.append(img_res["text"])
+                            avg_confs.append(img_res.get("confidence", 0.0))
+                    except Exception:
+                        continue
+
+            if pdf_images_text:
+                combined_text = "\n\n".join(pdf_images_text)
+                overall_conf = sum(avg_confs) / len(avg_confs) if avg_confs else 0.5
+                log_event(
+                    task_id=task_id,
+                    event_type="ocr",
+                    actor="tesseract",
+                    summary=f"Extracted text from scanned PDF images in '{p.name}'",
+                    metadata={"file_path": str(p), "engine": "tesseract_pdf_images", "confidence": overall_conf},
+                    external_calls=0,
+                )
+                return {
+                    "text": combined_text,
+                    "confidence": round(overall_conf, 4),
+                    "engine": "tesseract_pdf_images",
+                    "low_confidence": overall_conf < LOW_CONFIDENCE_THRESHOLD,
+                    "file_path": str(p),
+                }
+
+            # If no text and no extractable images could be found
+            return {
+                "text": "",
+                "confidence": 0.0,
+                "engine": "pdf_no_extractable_content",
+                "low_confidence": True,
+                "file_path": str(p),
+            }
+        except Exception:
+            return {
+                "text": "",
+                "confidence": 0.0,
+                "engine": "pdf_parse_error",
+                "low_confidence": True,
+                "file_path": str(p),
+            }
+
+    # Image-based path (.png, .jpg, etc.)
     ocr_result = run_ocr(p)
 
     log_event(

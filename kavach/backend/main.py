@@ -702,8 +702,11 @@ def knowledge_list():
     if not METADATA_PATH.exists():
         return {"documents": [], "total_chunks": 0}
 
-    with open(METADATA_PATH, "r", encoding="utf-8") as f:
-        metadata = json.load(f)
+    try:
+        with open(METADATA_PATH, "r", encoding="utf-8") as f:
+            metadata = json.load(f)
+    except Exception as exc:
+        return {"documents": [], "total_chunks": 0, "error": f"Metadata read error: {exc}"}
 
     counts: dict = {}
     for entry in metadata:
@@ -727,9 +730,12 @@ def knowledge_upload(file: UploadFile = File(...), ingest: bool = Form(True)):
             detail=f"Unsupported file type '{suffix}'. Supported: {sorted(SUPPORTED_EXTENSIONS)}",
         )
 
-    content = file.file.read()
-    dest = UPLOADS_DIR / safe_name
-    dest.write_bytes(content)
+    try:
+        content = file.file.read()
+        dest = UPLOADS_DIR / safe_name
+        dest.write_bytes(content)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to save uploaded file: {exc}")
 
     log_event(
         event_type="upload",
@@ -740,15 +746,39 @@ def knowledge_upload(file: UploadFile = File(...), ingest: bool = Form(True)):
     )
 
     if not ingest:
-        return {"filename": safe_name, "file_path": str(dest), "ingested": False, "chunk_count": 0}
+        return {
+            "filename": safe_name,
+            "file_path": str(dest),
+            "ingested": False,
+            "chunk_count": 0,
+            "chunks_created": 0,
+        }
 
-    result = ingest_document(dest)  # logs its own "ingest" audit event
-    return {
-        "filename": safe_name,
-        "file_path": str(dest),
-        "ingested": True,
-        "chunk_count": result["chunk_count"],
-    }
+    try:
+        result = ingest_document(dest)  # logs its own "ingest" audit event
+        chunk_count = result.get("chunk_count", 0)
+        return {
+            "filename": safe_name,
+            "file_path": str(dest),
+            "ingested": True,
+            "chunk_count": chunk_count,
+            "chunks_created": chunk_count,
+        }
+    except ollama.OllamaError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Local embedding service error: {exc}",
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Document ingestion error: {exc}",
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to ingest document into knowledge vault: {exc}",
+        )
 
 
 @app.get("/shield/status")

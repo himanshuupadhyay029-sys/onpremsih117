@@ -26,7 +26,7 @@ from backend.engine import ollama, registry
 _lock = threading.Lock()
 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".tiff", ".bmp"}
-SUPPORTED_EXTENSIONS = {".txt", ".md", ".pdf"} | IMAGE_EXTENSIONS
+SUPPORTED_EXTENSIONS = {".txt", ".md", ".pdf", ".docx"} | IMAGE_EXTENSIONS
 
 INDEX_PATH = config.FAISS_INDEX_DIR / "index.faiss"
 METADATA_PATH = config.FAISS_INDEX_DIR / "metadata.json"
@@ -39,6 +39,13 @@ def _extract_text(file_path: Path) -> str:
     suffix = file_path.suffix.lower()
     if suffix in (".txt", ".md"):
         return file_path.read_text(encoding="utf-8", errors="ignore")
+    if suffix == ".docx":
+        try:
+            import docx
+            doc = docx.Document(str(file_path))
+            return "\n".join(p.text for p in doc.paragraphs if p.text)
+        except Exception as exc:
+            raise ValueError(f"Failed to read .docx file: {exc}") from exc
     if suffix == ".pdf":
         from pypdf import PdfReader
 
@@ -99,18 +106,23 @@ def _chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OV
 
 def _load_index_and_metadata():
     if INDEX_PATH.exists() and METADATA_PATH.exists():
-        index = faiss.read_index(str(INDEX_PATH))
-        with open(METADATA_PATH, "r", encoding="utf-8") as f:
-            metadata = json.load(f)
-        return index, metadata
+        try:
+            index = faiss.read_index(str(INDEX_PATH))
+            with open(METADATA_PATH, "r", encoding="utf-8") as f:
+                metadata = json.load(f)
+            return index, metadata
+        except Exception:
+            return None, []
     return None, []
 
 
 def _save_index_and_metadata(index, metadata: List[Dict]) -> None:
     config.FAISS_INDEX_DIR.mkdir(parents=True, exist_ok=True)
     faiss.write_index(index, str(INDEX_PATH))
-    with open(METADATA_PATH, "w", encoding="utf-8") as f:
+    tmp_meta = METADATA_PATH.with_suffix(".tmp")
+    with open(tmp_meta, "w", encoding="utf-8") as f:
         json.dump(metadata, f, indent=2)
+    tmp_meta.replace(METADATA_PATH)
 
 
 def ingest_document(file_path: Union[str, Path]) -> Dict:
@@ -135,7 +147,9 @@ def ingest_document(file_path: Union[str, Path]) -> Dict:
         return {"source_filename": file_path.name, "chunk_count": 0}
 
     embed_model = registry.get_model("embedding")
-    vectors = [ollama.embed(embed_model, chunk) for chunk in chunks]
+    vectors = ollama.embed_batch(embed_model, chunks)
+    if not vectors or len(vectors[0]) == 0:
+        raise RuntimeError(f"Embedding model '{embed_model}' failed to produce vector embeddings.")
     dim = len(vectors[0])
 
     with _lock:

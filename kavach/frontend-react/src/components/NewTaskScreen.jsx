@@ -170,9 +170,24 @@ export default function NewTaskScreen({
         method: 'POST',
         body: formData,
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || res.statusText);
-      setAttachedFile({ name: data.filename, path: data.file_path });
+
+      let data = {};
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        try {
+          data = await res.json();
+        } catch {
+          data = {};
+        }
+      } else {
+        const textError = await res.text().catch(() => '');
+        data = { detail: textError || res.statusText };
+      }
+
+      if (!res.ok) {
+        throw new Error(data.detail || data.error || res.statusText || `Server error (${res.status})`);
+      }
+      setAttachedFile({ name: data.filename || file.name, path: data.file_path });
     } catch (err) {
       setAttachedFile({ name: `Upload failed: ${err.message}`, path: null });
     } finally {
