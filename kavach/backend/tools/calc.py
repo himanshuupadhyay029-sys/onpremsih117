@@ -15,6 +15,8 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 from backend.audit.logbook import log_event
 from backend.engine import ollama, registry
+import time
+from backend.terminal_logger import log_tool, _truncate
 
 CALC_IDENTIFY_PROMPT = """You are an engineering formula identification assistant. Extract the mathematical formula, variable values, and units from the task and context.
 
@@ -329,11 +331,13 @@ def calculate(
     task_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Main calculation orchestrator: extracts formula from LLM and computes deterministically."""
+    t0 = time.perf_counter()
     structured = identify_calculation(task_description, context=context)
 
     missing = structured.get("missing_inputs", [])
     if missing:
         error_msg = f"Cannot calculate - missing required input(s): {', '.join(missing)}"
+        log_tool("calc", "MISSING_INPUTS", f"Formula '{structured.get('formula_name')}' missing parameters: {missing}", is_error=True)
         log_event(
             task_id=task_id,
             event_type="calc",
@@ -356,11 +360,14 @@ def calculate(
         }
 
     comp_res = compute(structured)
+    elapsed = time.perf_counter() - t0
 
     if comp_res.get("success"):
         summary_str = f"Calculated '{comp_res['formula_name']}': {comp_res['formatted_result']}"
+        log_tool("calc", "EVAL_OK", f"{comp_res['formula_name']} -> {comp_res['formatted_result']}", elapsed_s=elapsed)
     else:
         summary_str = f"Calculation failed for '{comp_res['formula_name']}': {comp_res.get('error')}"
+        log_tool("calc", "EVAL_FAIL", f"{comp_res['formula_name']}: {comp_res.get('error')}", elapsed_s=elapsed, is_error=True)
 
     log_event(
         task_id=task_id,

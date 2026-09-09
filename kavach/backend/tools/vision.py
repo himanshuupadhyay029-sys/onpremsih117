@@ -3,10 +3,12 @@ import logging
 from pathlib import Path
 import re
 from typing import Any, Dict, Optional, Union
+import time
 
 from backend import config
 from backend.audit.logbook import log_event
 from backend.engine import ollama, registry
+from backend.terminal_logger import log_tool, _truncate
 
 logger = logging.getLogger("kavach.vision")
 if not logger.handlers:
@@ -90,10 +92,15 @@ def describe_image(
     }
     logger.info(f"[VISION] Stage 3 payload check: {payload_preview}")
 
+    t0 = time.perf_counter()
     try:
         response_text = ollama.vision(vision_model, prompt, p)
+        elapsed = time.perf_counter() - t0
+        log_tool("vision", "ANALYZE", f"Image '{p.name}' analyzed via model '{vision_model}'", elapsed_s=elapsed)
         logger.info(f"[VISION] Stage 4 - Response received: {str(response_text)[:200]}")
     except Exception as exc:
+        elapsed = time.perf_counter() - t0
+        log_tool("vision", "ERROR", f"Vision model '{vision_model}' failed: {exc}", elapsed_s=elapsed, is_error=True)
         logger.error(f"[VISION] Stage 4 FAILED - Ollama error: {exc}")
         response_text = f"[error] Vision model analysis failed: {exc}"
 

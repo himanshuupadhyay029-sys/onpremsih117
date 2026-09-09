@@ -98,9 +98,11 @@ Requirements:
 }
 
 
+from backend.terminal_logger import log_tool
+
+
 def _log_terminal(msg: str) -> None:
-    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    print(f"[{now_str}] [CodeGen] {msg}", flush=True)
+    log_tool("codegen", "CODE", msg)
 
 
 def detect_language(task_description: str) -> str:

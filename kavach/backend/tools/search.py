@@ -11,9 +11,11 @@ indicating whether the knowledge base actually supported the answer.
 """
 
 from typing import Dict, List, Optional
+import time
 
 from backend.audit.logbook import log_event
 from backend.engine import ollama, registry
+from backend.terminal_logger import log_tool, _truncate
 from backend.vault.retrieve import retrieve
 
 GROUNDING_PROMPT_TEMPLATE = """Answer the question using ONLY the source excerpts provided below. \
@@ -63,10 +65,13 @@ def _check_is_grounded(answer: str) -> bool:
 
 
 def search(query: str, task_id: Optional[str] = None) -> Dict:
+    t0 = time.perf_counter()
+    log_tool("vault", "SEARCH", f"Query: '{_truncate(query, 70)}'")
     results = retrieve(query)
 
     if not results:
         answer = "I don't have enough information in the knowledge vault to answer this."
+        log_tool("vault", "NO_MATCH", "No matching documents found in Knowledge Vault", is_error=True)
         log_event(
             task_id=task_id,
             event_type="search",
@@ -85,6 +90,10 @@ def search(query: str, task_id: Optional[str] = None) -> Dict:
 
     grounded = _check_is_grounded(answer)
     sources: List[Dict] = [{"filename": r["source_filename"], "excerpt": r["chunk_text"]} for r in results]
+    files_cited = list({s['filename'] for s in sources})
+
+    elapsed = time.perf_counter() - t0
+    log_tool("vault", "ANSWER", f"{len(results)} chunk(s) from {files_cited} (grounded={grounded})", elapsed_s=elapsed)
 
     log_event(
         task_id=task_id,

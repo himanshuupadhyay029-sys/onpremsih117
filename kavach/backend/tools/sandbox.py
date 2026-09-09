@@ -67,10 +67,12 @@ DOCKER_DESKTOP_EXE_PATHS = [
 ]
 
 
+from backend.terminal_logger import log_tool
+
+
 def _log_terminal(msg: str) -> None:
     """Outputs formatted and timestamped logs to stdout for developer visibility."""
-    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    print(f"[{now_str}] [Sandbox] {msg}", flush=True)
+    log_tool("sandbox", "CONTAINER", msg)
 
 
 def inspect_docker_status() -> Tuple[str, str]:

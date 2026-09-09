@@ -72,4 +72,6 @@ class AgentState(TypedDict):
     observe_decision: NotRequired[Optional[Dict[str, Any]]]
     clarify_question: NotRequired[Optional[str]]
     key_facts: NotRequired[Dict[str, Any]]
+    resumed: NotRequired[bool]
+    operator_reply: NotRequired[Optional[str]]
 

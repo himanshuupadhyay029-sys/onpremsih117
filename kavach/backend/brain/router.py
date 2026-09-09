@@ -11,6 +11,7 @@ from typing import List, Literal, Optional
 from pydantic import BaseModel
 
 from backend.engine import ollama, registry
+from backend.terminal_logger import log_terminal
 
 TaskType = Literal["document", "code", "calc", "search", "vision", "ocr", "llm"]
 
@@ -205,9 +206,11 @@ def route(
                 f"classification call returned '{task_type}'"
             )
 
-    return RoutingDecision(
+    decision = RoutingDecision(
         task_type=task_type,  # type: ignore[arg-type]
         model_role=MODEL_ROLE_BY_TASK_TYPE[task_type],
         tools_needed=TOOLS_BY_TASK_TYPE[task_type],
         reason=reason,
     )
+    log_terminal("Router", f"Evaluated sub-task -> intent '{decision.task_type}' (role '{decision.model_role}') | {decision.reason}")
+    return decision

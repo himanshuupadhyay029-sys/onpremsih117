@@ -22,11 +22,11 @@ from docx.shared import Inches, Pt, RGBColor
 from backend import config
 from backend.audit.logbook import log_event
 from backend.engine import ollama, registry
+from backend.terminal_logger import log_tool
 
 
 def _log_terminal(msg: str) -> None:
-    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    print(f"[{now_str}] [DocWriter] {msg}", flush=True)
+    log_tool("writer", "DOCX", msg)
 
 
 DRAFT_PROMPT_TEMPLATE = """You are a technical documentation writer. Based on the topic, context, and sources below, generate a clean, structured JSON outline for a formal document.

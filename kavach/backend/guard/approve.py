@@ -10,6 +10,7 @@ import re
 from typing import Any, Dict, List, Optional, Union
 
 from backend.audit.logbook import log_event
+from backend.terminal_logger import log_guard
 
 # In-memory store of approval records, keyed by task_id
 _APPROVAL_RECORDS: Dict[str, Dict[str, Any]] = {}
@@ -33,11 +34,13 @@ def assess_risk(
 
     # 1. Non-document tasks are routine / low risk
     if task_type != "document":
-        return {
+        res = {
             "risk": "low",
             "confidence": 0.95,
             "reasoning": f"Task type '{task_type}' is informational (search/calc/code) and does not produce a formal delivered report.",
         }
+        log_guard("risk", "ASSESS", f"Task '{task_type}' -> Risk: LOW (conf: 0.95)")
+        return res
 
     # Extract text representation to check for missing documentation notices and specific claims
     if isinstance(document_content, dict):
@@ -112,11 +115,13 @@ def assess_risk(
         }
 
     # 5. Document tasks with 2+ sources
-    return {
+    res = {
         "risk": "medium",
         "confidence": 0.85,
         "reasoning": f"Medium risk: document is grounded in {source_count} source(s), but requires human verification before final distribution.",
     }
+    log_guard("risk", "ASSESS", f"Document ({source_count} sources) -> Risk: MEDIUM (conf: 0.85)")
+    return res
 
 
 def request_approval(
@@ -141,6 +146,7 @@ def request_approval(
         "file_path": None,
     }
     _APPROVAL_RECORDS[task_id] = record
+    log_guard("approve", "GATE_PAUSED", f"Task {task_id[:8]} paused for Human Approval Gate (Risk: {record['risk'].upper()})")
     return record
 
 
@@ -191,6 +197,7 @@ def resolve_approval(
             record["document_content"] = edited_content
 
     # Append-only audit event for human oversight action
+    log_guard("approve", "DECISION", f"Task {task_id[:8]} -> Decision: '{decision_clean.upper()}' (Risk: {record['risk'].upper()})")
     log_event(
         task_id=task_id,
         event_type="approval",

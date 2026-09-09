@@ -27,8 +27,10 @@ except Exception as exc:
     print("  Stopping test as requested.")
     sys.exit(1)
 
-required_models = ["qwen2.5:3b-instruct", "qwen2.5-coder:3b", "nomic-embed-text"]
-missing_models = [req for req in required_models if not any(req in m for m in installed_models)]
+from backend.engine.registry import load_registry
+_reg = load_registry()
+required_models = [_reg.get("reasoning", "gemma3:4b"), _reg.get("code", "ibm/granite4.1:3b"), _reg.get("embedding", "nomic-embed-text")]
+missing_models = [req for req in required_models if not any(req.split(':')[0] in m for m in installed_models)]
 if missing_models:
     print(f"  [ERROR] Missing required model(s): {missing_models}")
     print(f"  Installed models: {installed_models}")

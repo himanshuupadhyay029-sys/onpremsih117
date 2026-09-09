@@ -427,6 +427,27 @@ export default function NewTaskScreen({
       } catch {}
     });
 
+    eventSource.addEventListener('revise', (e) => {
+      try {
+        const d = JSON.parse(e.data);
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === tempAsstId
+              ? {
+                  ...m,
+                  steps: d.plan || (m.steps || []).map((s) =>
+                    s.step === d.step
+                      ? { ...s, status: 'revising', input: d.revised_input || s.input }
+                      : s
+                  ),
+                  statusText: `Self-Correction (Retry #${d.retry_count}): Revising Step ${d.step} — ${d.reason || ''}`,
+                }
+              : m
+          )
+        );
+      } catch {}
+    });
+
     eventSource.addEventListener('clarify', (e) => {
       try {
         const d = JSON.parse(e.data);
@@ -535,6 +556,26 @@ export default function NewTaskScreen({
   const handleClarifyReply = async (taskId, replyText) => {
     if (!replyText.trim()) return;
     setRunning(true);
+
+    const replyMsgId = `user-reply-${Date.now()}`;
+    setMessages((prev) => [
+      ...prev.map((m) =>
+        m.task_id === taskId || m.meta?.task_id === taskId
+          ? {
+              ...m,
+              statusText: 'Resuming task with clarification…',
+              clarify_question: null,
+            }
+          : m
+      ),
+      {
+        id: replyMsgId,
+        role: 'user',
+        content: replyText,
+        created_at: new Date().toISOString(),
+      },
+    ]);
+
     try {
       const res = await fetch(`/run/${encodeURIComponent(taskId)}/reply`, {
         method: 'POST',
@@ -553,6 +594,7 @@ export default function NewTaskScreen({
                 result: data.result || m.result,
                 status: data.status,
                 clarify_question: null,
+                statusText: data.status === 'complete' ? 'Completed' : `Status: ${data.status}`,
                 steps: data.steps || data.plan || m.steps,
                 trace: data.trace || m.trace,
                 meta: {
@@ -567,6 +609,7 @@ export default function NewTaskScreen({
             : m
         )
       );
+      if (onChatsUpdated) onChatsUpdated();
     } catch (err) {
       alert(`Failed to send clarification: ${err.message}`);
     } finally {

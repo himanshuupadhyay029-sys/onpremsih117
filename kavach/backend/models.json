@@ -1,6 +1,6 @@
 {
-  "reasoning": "qwen2.5:7b-instruct",
-  "code": "qwen2.5-coder:3b",
+  "reasoning": "gemma3:4b",
+  "code": "ibm/granite4.1:3b",
   "vision": "qwen2.5vl:3b",
   "embedding": "nomic-embed-text:latest"
 }

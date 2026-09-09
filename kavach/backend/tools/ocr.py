@@ -12,8 +12,10 @@ import os
 from pathlib import Path
 import re
 from typing import Any, Dict, List, Optional, Tuple, Union
+import time
 
 from backend.audit.logbook import log_event
+from backend.terminal_logger import log_tool, _truncate
 
 # Threshold below which OCR is flagged for human review
 LOW_CONFIDENCE_THRESHOLD = 0.65
@@ -210,7 +212,10 @@ def extract_text(file_path: Union[str, Path], task_id: Optional[str] = None) -> 
             }
 
     # Image-based path (.png, .jpg, etc.)
+    t0 = time.perf_counter()
     ocr_result = run_ocr(p)
+    elapsed = time.perf_counter() - t0
+    log_tool("ocr", "EXTRACT", f"Extracted text from '{p.name}' via {ocr_result['engine']} (confidence: {ocr_result['confidence']:.2f})", elapsed_s=elapsed)
 
     log_event(
         task_id=task_id,
