@@ -1,13 +1,8 @@
-"""search.py — the agent's real 'search' tool (Phase 4 & 5).
+"""search.py — Grounded Knowledge Vault search tool with inline citations for KAVACH.
 
-Retrieves grounded context from the Knowledge Vault (backend/vault/retrieve.py)
-and answers using a strict grounding prompt: the reasoning model is told to
-answer ONLY from the provided excerpts, or admit it doesn't know, rather than
-guessing. Every call is audit-logged with external_calls=0 (FAISS + local
-Ollama only, no network calls).
-
-Phase 5 fix: returns structured {answer, sources, grounded: bool} flag
-indicating whether the knowledge base actually supported the answer.
+Retrieves grounded context via hybrid multi-stage retrieval (backend/vault/retrieve.py)
+and synthesizes answers with strict anti-hallucination framing and inline [1], [2]
+source citations. Every call is audit-logged with external_calls=0 (strictly local).
 """
 
 from typing import Dict, List, Optional
@@ -18,16 +13,24 @@ from backend.engine import ollama, registry
 from backend.terminal_logger import log_tool, _truncate
 from backend.vault.retrieve import retrieve
 
-GROUNDING_PROMPT_TEMPLATE = """Answer the question using ONLY the source excerpts provided below. \
-If the answer is not present in these excerpts, say plainly that you don't have enough \
-information to answer — do not guess, and do not use any outside knowledge.
+SEARCH_SYSTEM_PROMPT = """You are KAVACH's sovereign on-premises Knowledge Vault specialist.
+Your mission is to synthesize comprehensive, clear, and technically precise answers to the user's question using ONLY the provided verified source excerpts.
+
+Rules:
+1. Base all statements strictly on the provided excerpts.
+2. For every factual claim, include inline citations using bracketed numbers like [1], [2], or [1, 2] corresponding to the source entries.
+3. If the excerpts do not contain enough facts to answer a part of the question, clearly state what information is missing.
+4. Structure your response with clean markdown headings, bold terms, and bullet points.
+"""
+
+GROUNDING_PROMPT_TEMPLATE = """Source Excerpts from Knowledge Vault:
 
 {sources_block}
 
-Question: {query}
+User Question:
+{query}
 
-Answer clearly and concisely, and state which source(s) (by filename) you used.
-"""
+Please provide a detailed, well-structured answer with inline source citations [1], [2]:"""
 
 UNGROUNDED_INDICATORS = [
     "don't have enough information",
@@ -49,7 +52,6 @@ UNGROUNDED_INDICATORS = [
 def _check_is_grounded(answer: str) -> bool:
     """Returns False if the model admitted the question is completely uncovered by the excerpts."""
     ans_lower = answer.lower().strip()
-    # Direct explicit refusals with no content
     if any(ans_lower.startswith(prefix) for prefix in [
         "i don't have enough information",
         "i do not have enough information",
@@ -58,8 +60,7 @@ def _check_is_grounded(answer: str) -> bool:
         "not enough information",
     ]):
         return False
-    # If the answer references the retrieved source documents and provides excerpts
-    if any(ext in ans_lower for ext in [".md", ".docx", ".pdf", ".txt", "source:", "source(s)"]):
+    if any(marker in ans_lower for marker in ["[1]", "[2]", "[3]", ".md", ".docx", ".pdf", ".txt", ".png", "source:"]):
         return True
     return not any(indicator in ans_lower for indicator in UNGROUNDED_INDICATORS)
 
@@ -82,16 +83,49 @@ def search(query: str, task_id: Optional[str] = None) -> Dict:
         )
         return {"answer": answer, "sources": [], "grounded": False}
 
-    sources_block = "\n\n".join(f"[Source: {r['source_filename']}]\n{r['chunk_text']}" for r in results)
-    prompt = GROUNDING_PROMPT_TEMPLATE.format(sources_block=sources_block, query=query)
+    # Format structured evidence blocks with explicit source IDs [1], [2]
+    source_blocks = []
+    sources: List[Dict] = []
+    for rank, r in enumerate(results, start=1):
+        breadcrumb = r.get("breadcrumb") or r.get("source_filename", "Knowledge Vault")
+        source_blocks.append(
+            f"--- SOURCE [{rank}] ---\n"
+            f"Document: {r['source_filename']}\n"
+            f"Section: {breadcrumb}\n"
+            f"Content:\n{r['chunk_text']}\n"
+            f"------------------------"
+        )
+        sources.append(
+            {
+                "id": rank,
+                "filename": r["source_filename"],
+                "breadcrumb": breadcrumb,
+                "excerpt": r["chunk_text"],
+                "score": r.get("score", 1.0),
+            }
+        )
+
+    sources_block = "\n\n".join(source_blocks)
+    messages = [
+        {"role": "system", "content": SEARCH_SYSTEM_PROMPT},
+        {
+            "role": "user",
+            "content": f"Verified Source Excerpts from Knowledge Vault:\n\n{sources_block}\n\nUser Question:\n{query}\n\nPlease synthesize a clear, comprehensive answer using inline citations [1], [2]:",
+        },
+    ]
 
     reasoning_model = registry.get_model("reasoning")
-    answer = ollama.generate(reasoning_model, prompt)
+    try:
+        answer = ollama.chat(reasoning_model, messages)
+    except Exception:
+        try:
+            prompt = GROUNDING_PROMPT_TEMPLATE.format(sources_block=sources_block, query=query)
+            answer = ollama.generate(reasoning_model, prompt, system=SEARCH_SYSTEM_PROMPT)
+        except Exception as exc:
+            answer = f"[error] Reasoning model failed to synthesize answer: {exc}"
 
     grounded = _check_is_grounded(answer)
-    sources: List[Dict] = [{"filename": r["source_filename"], "excerpt": r["chunk_text"]} for r in results]
     files_cited = list({s['filename'] for s in sources})
-
     elapsed = time.perf_counter() - t0
     log_tool("vault", "ANSWER", f"{len(results)} chunk(s) from {files_cited} (grounded={grounded})", elapsed_s=elapsed)
 
@@ -102,11 +136,10 @@ def search(query: str, task_id: Optional[str] = None) -> Dict:
         summary=f"Search for '{query}': answered (grounded={grounded}) using {[s['filename'] for s in sources]}",
         metadata={
             "query": query,
-            "sources_used": [s["filename"] for s in sources] if grounded else [],
+            "sources_used": [f"[{s['id']}] {s['filename']} ({s['breadcrumb']})" for s in sources] if grounded else [],
             "grounded": grounded,
         },
         external_calls=0,
     )
 
-    # Only pass forward sources if the search was actually grounded in them
     return {"answer": answer, "sources": sources if grounded else [], "grounded": grounded}

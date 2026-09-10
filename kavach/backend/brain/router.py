@@ -6,12 +6,18 @@ or no keyword signal at all) — in that case exactly ONE cheap single-word
 classification call is made to the reasoning model.
 """
 
+import json
+import logging
+from pathlib import Path
+import re
 from typing import List, Literal, Optional
 
 from pydantic import BaseModel
 
 from backend.engine import ollama, registry
 from backend.terminal_logger import log_terminal
+
+logger = logging.getLogger("kavach.router")
 
 TaskType = Literal["document", "code", "calc", "search", "vision", "ocr", "llm"]
 
@@ -72,6 +78,8 @@ _KEYWORDS = {
         "ppe requirement", "ppe standard", "compliance requirement", "regulatory requirement",
         "what is the procedure", "what are the steps", "what is the limit",
         "what is the tolerance", "what are the requirements", "what is the policy",
+        "knowledge vault", "uploaded document", "uploaded file", "context document",
+        "manual", "handbook", "datasheet", "system context",
     ],
     "document": [
         "draft a", "draft an", "draft the", "write a report", "generate a report",
@@ -102,6 +110,52 @@ _KEYWORDS = {
 _ERROR_MARGIN_ZERO = 0
 
 
+def _get_vault_doc_names() -> List[str]:
+    """Dynamically reads the list of all currently indexed documents in the vault."""
+    try:
+        from backend.vault.ingest import METADATA_PATH
+        if not METADATA_PATH.exists():
+            return []
+        with open(METADATA_PATH, "r", encoding="utf-8") as f:
+            meta = json.load(f)
+        return sorted({entry.get("source_filename") for entry in meta if entry.get("source_filename")})
+    except Exception:
+        return []
+
+
+def _matches_vault_document(task_lower: str, doc_names: Optional[List[str]] = None) -> bool:
+    """Dynamically checks if the query references any active document in the Knowledge Vault."""
+    docs = doc_names if doc_names is not None else _get_vault_doc_names()
+    if not docs:
+        return False
+
+    task_words = set(re.findall(r"[a-z0-9]+", task_lower))
+
+    for doc in docs:
+        doc_lower = doc.lower()
+        stem = Path(doc).stem.lower()
+
+        # 1. Direct substring match of full filename or stem
+        if (len(doc_lower) > 3 and doc_lower in task_lower) or (len(stem) > 3 and stem in task_lower):
+            return True
+
+        # 2. Normalized stem (e.g. 'kavach_context' -> 'kavach context')
+        norm_stem = re.sub(r"[_\-.\(\)\[\]0-9]+", " ", stem).strip()
+        if len(norm_stem) > 3 and norm_stem in task_lower:
+            return True
+
+        # 3. Token match: check if significant stem words appear in the task
+        stem_tokens = [w for w in re.findall(r"[a-z0-9]+", stem) if len(w) >= 3 and not w.isdigit()]
+        if stem_tokens:
+            matched_tokens = [w for w in stem_tokens if w in task_words or w in task_lower]
+            if len(stem_tokens) == 1 and len(matched_tokens) == 1:
+                return True
+            elif len(stem_tokens) > 1 and len(matched_tokens) >= max(2, len(stem_tokens) // 2):
+                return True
+
+    return False
+
+
 class RoutingDecision(BaseModel):
     task_type: TaskType
     model_role: str
@@ -115,6 +169,8 @@ def _score_task(task_lower: str) -> dict:
         for kw in keywords:
             if kw in task_lower:
                 scores[cat] += 1
+    if _matches_vault_document(task_lower):
+        scores["search"] += 3  # Strong signal for vault document queries
     return scores
 
 
