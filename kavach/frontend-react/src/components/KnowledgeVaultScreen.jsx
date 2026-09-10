@@ -11,9 +11,11 @@ export default function KnowledgeVaultScreen() {
   const fetchKnowledgeList = async () => {
     try {
       const res = await fetch('/knowledge/list');
-      const data = await res.json();
-      setDocuments(data.documents || []);
-      setTotalChunks(data.total_chunks || 0);
+      if (res.ok) {
+        const data = await res.json();
+        setDocuments(data.documents || []);
+        setTotalChunks(data.total_chunks || 0);
+      }
     } catch {
       // ignore network errors
     } finally {
@@ -38,11 +40,27 @@ export default function KnowledgeVaultScreen() {
         method: 'POST',
         body: formData,
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || res.statusText);
+      
+      let data = {};
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        try {
+          data = await res.json();
+        } catch {
+          data = {};
+        }
+      } else {
+        const textError = await res.text().catch(() => '');
+        data = { detail: textError || res.statusText };
+      }
 
+      if (!res.ok) {
+        throw new Error(data.detail || data.error || res.statusText || `Server error (${res.status})`);
+      }
+
+      const addedChunks = data.chunks_created ?? data.chunk_count ?? 0;
       setUploadStatus(
-        `✓ Ingested ${data.filename} (${data.chunks_created || 0} chunks added)`
+        `✓ Ingested ${data.filename || file.name} (${addedChunks} chunk${addedChunks === 1 ? '' : 's'} added)`
       );
       fetchKnowledgeList();
       setTimeout(() => setUploadStatus(''), 6000);

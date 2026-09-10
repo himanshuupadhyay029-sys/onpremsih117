@@ -35,20 +35,23 @@ from backend.tools.search import search as search_tool
 from backend.tools.vision import describe_image as vision_tool_describe
 from backend.tools.writer import draft_document, render_docx, write_document as writer_tool
 
+import time
+from backend.terminal_logger import (
+    log_terminal as _log_terminal,
+    log_graph_start,
+    log_graph_complete,
+    log_node_enter,
+    log_node_exit,
+    log_plan,
+    log_route,
+    log_observe,
+    log_guard,
+    log_fact_update,
+)
+
 logger = logging.getLogger("kavach.agent")
 if not logger.handlers:
     logging.basicConfig(level=logging.INFO)
-
-
-def _log_terminal(category: str, msg: str) -> None:
-    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    out = f"[{now_str}] [{category}] {msg}"
-    try:
-        print(out, flush=True)
-    except UnicodeEncodeError:
-        safe_out = out.encode("ascii", errors="replace").decode("ascii")
-        print(safe_out, flush=True)
-
 
 
 MAX_TOTAL_STEPS = 8
@@ -417,8 +420,32 @@ def _run_stub_tool(tool: str, input_str: str, original_task: str, revise_count: 
 
 def master_plan_node(state: AgentState) -> dict:
     """Master Planner Layer: Decomposes the user request into ordered sub-tasks before routing."""
+    t_start = time.perf_counter()
+    # Fast-path for resumed execution (e.g. operator clarification reply or approval continuation)
+    if state.get("resumed") and state.get("plan"):
+        current_idx = state.get("current_step", 0)
+        updated_plan = list(state["plan"])
+        reply = state.get("operator_reply")
+        if reply and current_idx < len(updated_plan):
+            orig_inp = updated_plan[current_idx]["input"]
+            if reply not in orig_inp:
+                updated_plan[current_idx]["input"] = f"{orig_inp}\n\n[Operator Clarification]: {reply}"
+            updated_plan[current_idx]["status"] = "pending"
+
+        log_plan(state.get("task_id", ""), updated_plan, is_resume=True, current_step=current_idx + 1)
+        thought = {
+            "role": "thought",
+            "content": f"Resuming execution of existing plan from Step {current_idx + 1} with operator clarification.",
+        }
+        return {
+            "plan": updated_plan,
+            "status": "executing",
+            "clarify_question": None,
+            "trace": [thought],
+        }
+
     reasoning_model = registry.get_model("reasoning")
-    _log_terminal("Planner", f"Decomposing task using planner model '{reasoning_model}'...")
+    log_node_enter("planner", state.get("task_id"), f"Decomposing task with model '{reasoning_model}'")
     history_section = ""
     if state.get("history_context"):
         history_section = f"{state['history_context']}\n"
@@ -453,9 +480,9 @@ def master_plan_node(state: AgentState) -> dict:
         attachment_type=state.get("attachment_type"),
     )
 
-    _log_terminal("Planner", f"[OK] Master Plan established ({len(steps)} sub-task(s)):")
-    for s in steps:
-        _log_terminal("Planner", f"   * Step {s['step_num']}: [{s['tool']}] {s['input'][:85]}")
+    elapsed = time.perf_counter() - t_start
+    log_plan(state.get("task_id", ""), steps, is_resume=False)
+    log_node_exit("planner", state.get("task_id"), status="OK", elapsed_s=elapsed)
 
     action = {"role": "action", "content": f"Master Plan established ({len(steps)} sub-task(s)): {json.dumps(steps)}"}
 
@@ -517,11 +544,7 @@ def route_subtask_node(state: AgentState) -> dict:
     step["model"] = model_tag
     step["model_role"] = routing_dec.model_role
 
-    _log_terminal(
-        "Router",
-        f"[SWITCH] Step {step['step_num']}/{len(state['plan'])}: Routing to '{routing_dec.task_type}' | Active model switched to '{model_tag}' ({routing_dec.model_role})",
-    )
-
+    log_route(step["step_num"], len(state["plan"]), routing_dec.task_type, routing_dec.model_role, model_tag, routing_dec.reason)
 
     thought = {
         "role": "thought",
@@ -565,6 +588,7 @@ def route_subtask_node(state: AgentState) -> dict:
 
     return {
         "routing_decision": routing_dec.model_dump(),
+        "plan": state["plan"],
         "trace": [thought],
     }
 
@@ -575,11 +599,9 @@ def execute_node(state: AgentState) -> dict:
     step = state["plan"][idx]
     tool = step["tool"]
     step_input = step["input"]
+    t0 = time.perf_counter()
 
-    _log_terminal(
-        "Executor",
-        f"[RUN] Executing Sub-Task {step['step_num']}/{len(state['plan'])} [{tool}] with model '{step.get('model', 'specialist')}'...",
-    )
+    log_node_enter("executor", state.get("task_id"), f"Step {step['step_num']}/{len(state['plan'])} [{tool}] with model '{step.get('model', 'specialist')}'")
 
     thought = {"role": "thought", "content": f"Executing step {step['step_num']}: tool='{tool}', input={step_input!r}"}
     action = {"role": "action", "content": f"CALL {tool}({step_input!r})"}
@@ -600,7 +622,10 @@ def execute_node(state: AgentState) -> dict:
     accumulated_key_facts = dict(state.get("key_facts") or {})
     accumulated_key_facts.update(new_facts)
 
-    _log_terminal("Executor", f"[DONE] Step {step['step_num']} [{tool}] completed ({'ERROR' if is_error else 'OK'}) using model '{actor}'.")
+    elapsed = time.perf_counter() - t0
+    log_node_exit("executor", state.get("task_id"), status="ERROR" if is_error else "OK", elapsed_s=elapsed, summary=f"Step {step['step_num']} [{tool}] via '{actor}'")
+    if new_facts:
+        log_fact_update(new_facts)
 
     step_output = {
         "step_num": step["step_num"],
@@ -729,16 +754,13 @@ def observe_node(state: AgentState) -> dict:
     key_facts_json = json.dumps(state.get("key_facts", {}), indent=2)
     total_steps = len(state["plan"])
 
-    prompt = OBSERVE_PROMPT_TEMPLATE.format(
-        task=state["original_task"],
-        plan_overview=plan_overview,
-        step_num=last_output["step_num"],
-        total_steps=total_steps,
-        tool=last_output["tool"],
-        step_input=last_output["input"],
-        status_str=status_str,
-        output_preview=last_output["output"][:1200],
-        key_facts_json=key_facts_json,
+    step_input_val = str(last_output.get("input") or "")
+    output_text = str(last_output.get("output") or "")
+
+    # Check for missing parameters that require human clarification on current step
+    needs_clarification = bool(
+        last_output.get("needs_clarification")
+        or (is_error and ("missing required input" in output_text.lower() or "missing required parameter" in output_text.lower()))
     )
 
     action = "continue"
@@ -747,36 +769,69 @@ def observe_node(state: AgentState) -> dict:
     retry_instruction = ""
     clarify_question = ""
 
-    try:
-        raw = ollama.generate(reasoning_model, prompt).strip()
-        match = re.search(r"\{.*\}", raw, re.DOTALL)
-        if match:
-            parsed = json.loads(match.group(0))
-            action = str(parsed.get("action", "continue")).strip().lower()
-            reasoning = str(parsed.get("reasoning", "")).strip()
-            new_steps = parsed.get("new_steps") or []
-            retry_instruction = str(parsed.get("retry_instruction", "")).strip()
-            clarify_question = str(parsed.get("clarify_question", "")).strip()
-        else:
-            raise ValueError("No valid JSON found in LLM response")
-    except Exception as exc:
-        _log_terminal("Observer", f"[WARN] LLM observe reasoning failed ({exc}); falling back to deterministic policy.")
-        if is_error or (is_ungrounded_search and revise_count == 0):
-            if revise_count < MAX_REVISIONS:
-                action = "retry"
-                reasoning = "Tool error detected; triggering self-correcting retry."
+    if needs_clarification:
+        clar_q = (
+            last_output.get("clarify_question")
+            or state.get("key_facts", {}).get("clarify_question")
+            or (output_text.replace("[error]", "").strip() if "missing required" in output_text.lower() else None)
+            or "Required parameters are missing to complete this step. Could you please provide the missing values?"
+        )
+        action = "clarify"
+        clarify_question = clar_q
+        reasoning = f"Step requires operator clarification: {clar_q}"
+    else:
+        # Clear stale clarification state from key_facts if present
+        if "key_facts" in state and isinstance(state["key_facts"], dict):
+            state["key_facts"].pop("needs_clarification", None)
+            state["key_facts"].pop("clarify_question", None)
+
+        prompt = OBSERVE_PROMPT_TEMPLATE.format(
+            task=state["original_task"],
+            plan_overview=plan_overview,
+            step_num=last_output["step_num"],
+            total_steps=total_steps,
+            tool=last_output["tool"],
+            step_input=step_input_val,
+            status_str=status_str,
+            output_preview=output_text[:1200],
+            key_facts_json=key_facts_json,
+        )
+
+        try:
+            raw = ollama.generate(reasoning_model, prompt).strip()
+            fence_m = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw, re.DOTALL)
+            raw_json = fence_m.group(1) if fence_m else None
+            if not raw_json:
+                brace_m = re.search(r"(\{.*\})", raw, re.DOTALL)
+                raw_json = brace_m.group(1) if brace_m else None
+
+            if raw_json:
+                parsed = json.loads(raw_json)
+                action = str(parsed.get("action", "continue")).strip().lower()
+                reasoning = str(parsed.get("reasoning", "")).strip()
+                new_steps = parsed.get("new_steps") or []
+                retry_instruction = str(parsed.get("retry_instruction", "")).strip()
+                clarify_question = str(parsed.get("clarify_question", "")).strip()
+            else:
+                raise ValueError("No valid JSON found in LLM response")
+        except Exception as exc:
+            _log_terminal("Observer", f"[WARN] LLM observe reasoning failed ({exc}); falling back to deterministic policy.")
+            if is_error or (is_ungrounded_search and revise_count == 0):
+                if revise_count < MAX_REVISIONS:
+                    action = "retry"
+                    reasoning = "Tool error detected; triggering self-correcting retry."
+                elif state["current_step"] + 1 < len(state["plan"]):
+                    action = "continue"
+                    reasoning = "Step error unresolved after retries; continuing with remaining plan."
+                else:
+                    action = "done"
+                    reasoning = "Final step completed with error."
             elif state["current_step"] + 1 < len(state["plan"]):
                 action = "continue"
-                reasoning = "Step error unresolved after retries; continuing with remaining plan."
+                reasoning = "Step succeeded; continuing to next step."
             else:
                 action = "done"
-                reasoning = "Final step completed with error."
-        elif state["current_step"] + 1 < len(state["plan"]):
-            action = "continue"
-            reasoning = "Step succeeded; continuing to next step."
-        else:
-            action = "done"
-            reasoning = "All plan steps completed."
+                reasoning = "All plan steps completed."
 
     observe_decision = {
         "action": action,
@@ -786,7 +841,7 @@ def observe_node(state: AgentState) -> dict:
         "clarify_question": clarify_question,
     }
 
-    _log_terminal("Observer", f"[DECISION] Action: '{action.upper()}' | {reasoning}")
+    log_observe(action, reasoning, new_steps=new_steps if action == 'replan' else None, retry_count=revise_count + 1 if action == 'retry' else None)
 
     if action == "clarify" and clarify_question:
         trace_entries.append({"role": "thought", "content": f"Clarification required: {clarify_question}"})
@@ -840,6 +895,7 @@ def observe_node(state: AgentState) -> dict:
             )
             return {
                 "trace": trace_entries,
+                "plan": state["plan"],
                 "status": "revising",
                 "observe_decision": observe_decision,
             }
@@ -973,8 +1029,8 @@ def replan_node(state: AgentState) -> dict:
     updated_plan = current_plan[: current_idx + 1]
     next_num = current_idx + 2
     for s in new_step_defs:
-        tool_name = _normalize_tool(s.get("tool", "llm"))
-        inp = s.get("input", "")
+        tool_name = _normalize_tool(s.get("tool") or s.get("tool_hint", "llm"))
+        inp = str(s.get("input") or s.get("instruction") or s.get("description") or s.get("task") or "").strip()
         if inp:
             updated_plan.append({
                 "step_num": next_num,
@@ -984,15 +1040,28 @@ def replan_node(state: AgentState) -> dict:
             })
             next_num += 1
 
+    # Check if any new steps were actually added
+    if len(updated_plan) <= current_idx + 1:
+        _log_terminal("Agent", "[REPLAN] No valid new sub-tasks could be extracted. Completing workflow.")
+        thought = {
+            "role": "thought",
+            "content": "Dynamic Replan attempted, but no further valid sub-tasks were identified. Completing execution.",
+        }
+        return {
+            "plan": updated_plan,
+            "status": "complete",
+            "trace": [thought],
+        }
+
     replan_count = state.get("replan_count", 0) + 1
     thought = {
         "role": "thought",
         "content": f"Dynamic Replan #{replan_count}: Restructured plan to {len(updated_plan)} total steps. Reason: {decision.get('reasoning')}",
     }
 
-    _log_terminal("Agent", f"[REPLAN] Dynamic replanning active ({replan_count}/{MAX_REVISIONS}). Total steps now: {len(updated_plan)}")
-    for s in updated_plan[current_idx + 1:]:
-        _log_terminal("Agent", f"   + Step {s['step_num']}: [{s['tool']}] {s['input'][:85]}")
+    log_node_enter("replan", state.get("task_id"), f"Dynamic replanning #{replan_count}/{MAX_REVISIONS}")
+    log_plan(state.get("task_id", ""), updated_plan, is_resume=False)
+    log_node_exit("replan", state.get("task_id"), status="OK", summary=f"Total steps now: {len(updated_plan)}")
 
     log_event(
         task_id=state.get("task_id"),
@@ -1077,6 +1146,8 @@ def revise_node(state: AgentState) -> dict:
     revise_count = state.get("revise_count", 0)
     tool = step["tool"]
 
+    log_node_enter("revise", state.get("task_id"), f"Step {step['step_num']} [{tool}] (Self-Correction #{revise_count + 1})")
+
     thought = {
         "role": "thought",
         "content": f"Dynamically repairing Sub-Task {step['step_num']} ({tool}) (revision #{revise_count + 1}).",
@@ -1118,10 +1189,12 @@ def revise_node(state: AgentState) -> dict:
             "step_num": step["step_num"],
             "tool": tool,
             "revision": revise_count + 1,
+            "new_input": step["input"],
         },
     )
 
     return {
+        "plan": state["plan"],
         "status": "executing",
         "revise_count": revise_count + 1,
         "trace": [thought],
@@ -1168,12 +1241,18 @@ def finalize_node(state: AgentState) -> dict:
             "messages": [{"role": "assistant", "content": final_answer}],
         }
 
+    # Deduplicate step outputs so only the latest attempt per step number is used in summary
+    latest_outputs_by_step: Dict[int, dict] = {}
+    for o in state.get("step_outputs", []):
+        latest_outputs_by_step[o["step_num"]] = o
+    deduped_outputs = list(latest_outputs_by_step.values())
+
     outputs_summary = "\n\n".join(
-        f"Sub-Task {o['step_num']} ({o['tool']}): {o['output']}" for o in state["step_outputs"]
+        f"Sub-Task {o['step_num']} ({o['tool']}): {o['output']}" for o in deduped_outputs
     )
 
-    if len(state["step_outputs"]) == 1 and state["step_outputs"][0]["tool"] in ("search", "document", "calc"):
-        final_answer = state["step_outputs"][0]["output"]
+    if len(deduped_outputs) == 1 and deduped_outputs[0]["tool"] in ("search", "document", "calc") and not deduped_outputs[0].get("error"):
+        final_answer = deduped_outputs[0]["output"]
         thought = {"role": "thought", "content": "Sub-task completed directly with verified tool output."}
     else:
         history_section = ""
@@ -1188,7 +1267,8 @@ def finalize_node(state: AgentState) -> dict:
         )
 
         thought = {"role": "thought", "content": "Synthesizing cohesive final answer from all sub-task results."}
-        _log_terminal("Finalizer", f"[SYNTH] Synthesizing final answer using model '{model}'...")
+        t_synth = time.perf_counter()
+        log_node_enter("finalizer", state.get("task_id"), f"Synthesizing final answer with model '{model}'")
         try:
             final_answer = ollama.generate(model, prompt)
             if not final_answer.strip():
@@ -1197,6 +1277,7 @@ def finalize_node(state: AgentState) -> dict:
         except Exception as exc:
             _log_terminal("Finalizer", f"[ERROR] Synthesis LLM call failed: {exc}. Using step output summary as answer.")
             final_answer = f"Task completed. Here is a summary of what was done:\n\n{outputs_summary}"
+        log_node_exit("finalizer", state.get("task_id"), status="OK", elapsed_s=time.perf_counter() - t_synth)
 
     observation = {"role": "observation", "content": f"Final answer: {final_answer[:300]}"}
 
@@ -1241,6 +1322,10 @@ def route_after_observe(state: AgentState) -> str:
     return state["status"]
 
 
+def route_after_replan(state: AgentState) -> str:
+    return "route_subtask" if state.get("status") == "executing" else "finalize"
+
+
 def build_graph():
     graph = StateGraph(AgentState)
     graph.add_node("master_plan", master_plan_node)
@@ -1269,7 +1354,14 @@ def build_graph():
             "awaiting_approval": "finalize",
         },
     )
-    graph.add_edge("replan", "route_subtask")
+    graph.add_conditional_edges(
+        "replan",
+        route_after_replan,
+        {
+            "route_subtask": "route_subtask",
+            "finalize": "finalize",
+        },
+    )
     graph.add_edge("clarify", END)
     graph.add_edge("revise", "execute")
     graph.add_edge("finalize", END)
@@ -1291,15 +1383,24 @@ def run_agent(
     if not task_id:
         task_id = str(uuid.uuid4())
 
-    _log_terminal("Agent", f"[START] Task received [ID: {task_id[:8]}]: '{task[:85]}'")
+    t_agent_start = time.perf_counter()
+    log_graph_start(task_id, task, history_len=len(history or []), facts_count=len(initial_key_facts or {}))
 
     history_ctx = _format_history(history)
 
     if resume_state:
         initial_state = dict(resume_state)
         initial_state["task_id"] = task_id
+        initial_state["resumed"] = True
+        initial_state["status"] = "executing"
+        initial_state["clarify_question"] = None
+        if "key_facts" in initial_state and isinstance(initial_state["key_facts"], dict):
+            initial_state["key_facts"] = dict(initial_state["key_facts"])
+            initial_state["key_facts"].pop("needs_clarification", None)
+            initial_state["key_facts"].pop("clarify_question", None)
         if task:
-            initial_state["original_task"] = task
+            initial_state["operator_reply"] = task
+            initial_state["original_task"] = f"{resume_state.get('original_task', '')}\n[Clarification]: {task}".strip()
     else:
         initial_state: AgentState = {
             "task_id": task_id,
@@ -1407,10 +1508,8 @@ def run_agent(
     if model_used and model_used not in models_used:
         models_used.append(model_used)
 
-    _log_terminal(
-        "Agent",
-        f"[COMPLETE] Task complete [ID: {task_id[:8]}]. Models engaged: {' -> '.join(models_used) if models_used else model_used}",
-    )
+    total_agent_elapsed = time.perf_counter() - t_agent_start
+    log_graph_complete(task_id, final_state.get("status", "complete"), models_used, elapsed_s=total_agent_elapsed)
 
     result_payload = {
         "task_id": task_id,

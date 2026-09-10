@@ -15,6 +15,8 @@ import numpy as np
 
 from backend.vault.ingest import INDEX_PATH, METADATA_PATH
 from backend.engine import ollama, registry
+import time
+from backend.terminal_logger import log_tool
 
 DEFAULT_TOP_K = 6
 DEFAULT_FINAL_K = 4
@@ -79,6 +81,7 @@ def retrieve(query: str, top_k: int = DEFAULT_TOP_K, final_k: int = DEFAULT_FINA
     if index is None or index.ntotal == 0:
         return []
 
+    t0 = time.perf_counter()
     embed_model = registry.get_model("embedding")
     query_vec = np.array(ollama.embed(embed_model, query), dtype="float32")
 
@@ -102,4 +105,6 @@ def retrieve(query: str, top_k: int = DEFAULT_TOP_K, final_k: int = DEFAULT_FINA
         candidate_vecs.append(index.reconstruct(int(idx)))
 
     final_count = min(final_k, len(candidates))
-    return _mmr_select(query_vec, candidate_vecs, candidates, k=final_count)
+    selected = _mmr_select(query_vec, candidate_vecs, candidates, k=final_count)
+    log_tool("vault", "FAISS", f"Searched {index.ntotal} vectors -> {len(candidates)} candidates, {len(selected)} MMR chunks selected", elapsed_s=time.perf_counter() - t0)
+    return selected

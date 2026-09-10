@@ -53,6 +53,8 @@ def emit_sync(task_id: Optional[str], event_type: str, data: Dict[str, Any]) -> 
     }
 
     try:
+        from backend.terminal_logger import log_gateway_event
+        log_gateway_event(event_type, task_id)
         loop.call_soon_threadsafe(queue.put_nowait, payload)
     except Exception as exc:
         logger.debug(f"[EVENT_BUS] Failed to emit event '{event_type}' for {task_id}: {exc}")

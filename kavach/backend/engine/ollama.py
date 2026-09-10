@@ -80,7 +80,7 @@ def embed(model: str, text: str) -> List[float]:
         "prompt": text,
     }
     try:
-        with _get_client(timeout=30.0) as client:
+        with _get_client(timeout=120.0) as client:
             resp = client.post("/api/embeddings", json=payload)
             resp.raise_for_status()
             data = resp.json()

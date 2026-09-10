@@ -94,7 +94,18 @@ export default function MessageTurn({
     return turn.draft_content || meta.draft_content || null;
   }, [turn.draft_content, meta.draft_content]);
 
-  const approvalOutcome = turn.approvalOutcome || {};
+  const approvalOutcome = useMemo(() => {
+    const fromTurn = turn.approvalOutcome || {};
+    const tid = turn.task_id || meta.task_id;
+    if (tid && fromTurn[tid]) return fromTurn;
+    if (tid && meta.approval_outcome) {
+      return {
+        ...fromTurn,
+        [tid]: meta.approval_outcome,
+      };
+    }
+    return fromTurn;
+  }, [turn.approvalOutcome, turn.task_id, meta.task_id, meta.approval_outcome]);
 
   // Extract all referenced sources
   const sourceNames = useMemo(() => {

@@ -36,6 +36,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 from backend.guard.approve import get_approval, resolve_approval
 from backend.tools.writer import render_docx
+from backend.terminal_logger import log_gateway, _truncate
 from backend.vault.ingest import METADATA_PATH, SUPPORTED_EXTENSIONS, ingest_document
 from backend.shield.firewall import (
     check_firewall_status,
@@ -91,6 +92,10 @@ def _stop_shield_monitor() -> None:
     stop_monitor()
 
 
+# In-memory snapshot cache for fast task state resumption across anonymous and authenticated sessions
+_AGENT_RUNS_CACHE: Dict[str, Dict[str, Any]] = {}
+
+
 class RunRequest(BaseModel):
     task: str
     attachment_type: Optional[str] = None
@@ -125,6 +130,7 @@ def run(
     current_user: Optional[User] = Depends(get_optional_user),
     db: Session = Depends(get_db),
 ):
+    log_gateway("POST /run", req.task_id, f"Task: '{_truncate(req.task, 65)}'")
     chat = None
     user_msg = None
     chat_id = req.chat_id
@@ -199,8 +205,12 @@ def run(
         initial_key_facts=initial_key_facts,
     )
 
-    if chat:
-        try:
+    task_id_str = agent_res.get("task_id") or req.task_id or str(uuid.uuid4())
+    if agent_res.get("state_snapshot"):
+        _AGENT_RUNS_CACHE[task_id_str] = agent_res["state_snapshot"]
+
+    try:
+        if chat:
             # Merge updated agent memory
             new_facts = agent_res.get("key_facts") or {}
             if new_facts:
@@ -233,23 +243,6 @@ def run(
             )
             db.add(asst_msg)
 
-            # Persist AgentRun for state snapshot and resume
-            task_id_str = agent_res.get("task_id") or req.task_id or str(uuid.uuid4())
-            agent_run = db.query(AgentRun).filter(AgentRun.task_id == task_id_str).first()
-            if not agent_run:
-                agent_run = AgentRun(
-                    id=uuid.uuid4(),
-                    chat_id=chat.id,
-                    task_id=task_id_str,
-                    status=agent_res.get("status", "complete"),
-                    state_snapshot=agent_res.get("state_snapshot", {}),
-                )
-                db.add(agent_run)
-            else:
-                agent_run.status = agent_res.get("status", "complete")
-                agent_run.state_snapshot = agent_res.get("state_snapshot", {})
-                agent_run.updated_at = func.now()
-
             if chat.title == "New Chat":
                 clean_title = req.task.strip().split("\n")[0]
                 if len(clean_title) > 40:
@@ -257,9 +250,26 @@ def run(
                 chat.title = clean_title or "New Chat"
 
             chat.updated_at = func.now()
-            db.commit()
-        except Exception as exc:
-            print(f"[ERROR] Failed to persist assistant message & run: {exc}", flush=True)
+
+        # Persist AgentRun for state snapshot and resume
+        agent_run = db.query(AgentRun).filter(AgentRun.task_id == task_id_str).first()
+        if not agent_run:
+            agent_run = AgentRun(
+                id=uuid.uuid4(),
+                chat_id=chat.id if chat else None,
+                task_id=task_id_str,
+                status=agent_res.get("status", "complete"),
+                state_snapshot=agent_res.get("state_snapshot", {}),
+            )
+            db.add(agent_run)
+        else:
+            agent_run.status = agent_res.get("status", "complete")
+            agent_run.state_snapshot = agent_res.get("state_snapshot", {})
+            agent_run.updated_at = func.now()
+
+        db.commit()
+    except Exception as exc:
+        print(f"[ERROR] Failed to persist assistant message & run: {exc}", flush=True)
 
     if chat:
         agent_res["chat_id"] = str(chat.id)
@@ -284,6 +294,7 @@ async def run_stream(
     if not task_id:
         task_id = str(uuid.uuid4())
 
+    log_gateway("POST /run/stream", task_id, f"Task: '{_truncate(task, 65)}'")
     loop = asyncio.get_running_loop()
     queue = register_task(task_id, loop)
 
@@ -377,25 +388,34 @@ async def run_stream(
                         )
                         worker_db.add(asst_msg)
 
-                        ar = worker_db.query(AgentRun).filter(AgentRun.task_id == task_id).first()
-                        if not ar:
-                            ar = AgentRun(
-                                id=uuid.uuid4(),
-                                chat_id=c.id,
-                                task_id=task_id,
-                                status=res.get("status", "complete"),
-                                state_snapshot=res.get("state_snapshot", {}),
-                            )
-                            worker_db.add(ar)
-                        else:
-                            ar.status = res.get("status", "complete")
-                            ar.state_snapshot = res.get("state_snapshot", {})
-                            ar.updated_at = func.now()
-
                         c.updated_at = func.now()
                         worker_db.commit()
                 except Exception as exc:
                     print(f"[ERROR] Worker failed DB persist: {exc}", flush=True)
+
+            # Always cache state snapshot and persist AgentRun for task resumption
+            _AGENT_RUNS_CACHE[task_id] = res.get("state_snapshot", {})
+            try:
+                c_uuid = uuid.UUID(chat_db_id) if chat_db_id else None
+                ar = worker_db.query(AgentRun).filter(AgentRun.task_id == task_id).first()
+                if not ar:
+                    ar = AgentRun(
+                        id=uuid.uuid4(),
+                        chat_id=c_uuid,
+                        task_id=task_id,
+                        status=res.get("status", "complete"),
+                        state_snapshot=res.get("state_snapshot", {}),
+                    )
+                    worker_db.add(ar)
+                else:
+                    if c_uuid:
+                        ar.chat_id = c_uuid
+                    ar.status = res.get("status", "complete")
+                    ar.state_snapshot = res.get("state_snapshot", {})
+                    ar.updated_at = func.now()
+                worker_db.commit()
+            except Exception as exc:
+                print(f"[ERROR] Worker failed to persist AgentRun: {exc}", flush=True)
 
             res["chat_id"] = chat_db_id
             res["chat_title"] = chat_db_title
@@ -449,57 +469,76 @@ def reply_to_agent(
     db: Session = Depends(get_db),
 ):
     """Resumes a paused agent run after user clarification or operator feedback."""
+    log_gateway("POST /run/{task_id}/reply", task_id, f"Reply: '{_truncate(req.reply, 65)}'")
     agent_run = db.query(AgentRun).filter(AgentRun.task_id == task_id).first()
-    if not agent_run:
-        raise HTTPException(status_code=404, detail="Agent run not found")
+    snapshot = None
+    if agent_run and agent_run.state_snapshot:
+        snapshot = dict(agent_run.state_snapshot)
+    if not snapshot and task_id in _AGENT_RUNS_CACHE:
+        snapshot = dict(_AGENT_RUNS_CACHE[task_id])
 
-    snapshot = dict(agent_run.state_snapshot or {})
     if not snapshot:
-        raise HTTPException(status_code=400, detail="No resume snapshot available for this run")
+        raise HTTPException(status_code=404, detail="No resume snapshot available for this run")
 
-    curr_idx = snapshot.get("current_step", 0)
-    if snapshot.get("plan") and curr_idx < len(snapshot["plan"]):
-        orig_inp = snapshot["plan"][curr_idx]["input"]
-        snapshot["plan"][curr_idx]["input"] = f"{orig_inp}\n\n[Operator Feedback/Clarification]: {req.reply}"
-
+    snapshot["resumed"] = True
     snapshot["status"] = "executing"
     snapshot["clarify_question"] = None
+    snapshot["operator_reply"] = req.reply
 
     res = run_agent(
-        task="",
+        task=req.reply,
         task_id=task_id,
         resume_state=snapshot,
     )
 
-    agent_run.status = res.get("status", "complete")
-    agent_run.state_snapshot = res.get("state_snapshot", {})
-    agent_run.updated_at = func.now()
+    _AGENT_RUNS_CACHE[task_id] = res.get("state_snapshot", {})
 
-    if agent_run.chat_id:
+    if agent_run:
+        agent_run.status = res.get("status", "complete")
+        agent_run.state_snapshot = res.get("state_snapshot", {})
+        agent_run.updated_at = func.now()
+
+    chat = None
+    if agent_run and agent_run.chat_id:
         chat = db.query(Chat).filter(Chat.id == agent_run.chat_id).first()
-        if chat:
-            asst_msg = Message(
-                id=uuid.uuid4(),
-                chat_id=chat.id,
-                role="assistant",
-                content=res.get("result", "") or "",
-                meta={
-                    "task_id": res.get("task_id"),
-                    "status": res.get("status"),
-                    "trace": res.get("trace", []),
-                    "steps": res.get("steps", res.get("plan", [])),
-                    "step_outputs": res.get("step_outputs", []),
-                    "sources": res.get("sources", []),
-                    "generated_files": res.get("generated_files", []),
-                    "code_runs": res.get("code_runs", []),
-                    "model_used": res.get("model_used"),
-                    "models_used": res.get("models_used", []),
-                    "routing_decision": res.get("routing_decision"),
-                    "key_facts": res.get("key_facts"),
-                },
-            )
-            db.add(asst_msg)
-            chat.updated_at = func.now()
+    elif req.chat_id:
+        try:
+            chat = db.query(Chat).filter(Chat.id == uuid.UUID(req.chat_id)).first()
+        except Exception:
+            chat = None
+
+    if chat:
+        user_msg = Message(
+            id=uuid.uuid4(),
+            chat_id=chat.id,
+            role="user",
+            content=req.reply,
+            meta={"clarification_reply": True, "task_id": task_id},
+        )
+        db.add(user_msg)
+
+        asst_msg = Message(
+            id=uuid.uuid4(),
+            chat_id=chat.id,
+            role="assistant",
+            content=res.get("result", "") or "",
+            meta={
+                "task_id": res.get("task_id"),
+                "status": res.get("status"),
+                "trace": res.get("trace", []),
+                "steps": res.get("steps", res.get("plan", [])),
+                "step_outputs": res.get("step_outputs", []),
+                "sources": res.get("sources", []),
+                "generated_files": res.get("generated_files", []),
+                "code_runs": res.get("code_runs", []),
+                "model_used": res.get("model_used"),
+                "models_used": res.get("models_used", []),
+                "routing_decision": res.get("routing_decision"),
+                "key_facts": res.get("key_facts"),
+            },
+        )
+        db.add(asst_msg)
+        chat.updated_at = func.now()
 
     db.commit()
     return res
@@ -617,7 +656,12 @@ def get_approval_endpoint(task_id: str):
 
 
 @app.post("/approval/{task_id}")
-def post_approval_endpoint(task_id: str, req: ApprovalRequest):
+def post_approval_endpoint(
+    task_id: str,
+    req: ApprovalRequest,
+    db: Session = Depends(get_db),
+):
+    log_gateway("POST /approval/{task_id}", task_id, f"Decision: '{req.decision}'")
     record = get_approval(task_id)
     if not record:
         raise HTTPException(status_code=404, detail=f"No approval record found for task '{task_id}'.")
@@ -629,6 +673,26 @@ def post_approval_endpoint(task_id: str, req: ApprovalRequest):
     resolved = resolve_approval(task_id, decision=decision, edited_content=req.edited_content)
 
     if decision == "reject":
+        try:
+            agent_run = db.query(AgentRun).filter(AgentRun.task_id == task_id).first()
+            if agent_run:
+                agent_run.status = "rejected"
+                agent_run.updated_at = func.now()
+            msgs = db.query(Message).filter(Message.role == "assistant").order_by(Message.created_at.desc()).limit(30).all()
+            for m in msgs:
+                if m.meta and m.meta.get("task_id") == task_id:
+                    meta = dict(m.meta or {})
+                    meta["approval_outcome"] = {
+                        "rejected": True,
+                        "decision": "reject",
+                        "message": "Document generation rejected by operator. No file generated.",
+                    }
+                    m.meta = meta
+                    break
+            db.commit()
+        except Exception as exc:
+            print(f"[WARN] Failed to persist rejection in DB: {exc}", flush=True)
+
         return {
             "task_id": task_id,
             "status": "rejected",
@@ -666,6 +730,28 @@ def post_approval_endpoint(task_id: str, req: ApprovalRequest):
         external_calls=0,
     )
 
+    try:
+        agent_run = db.query(AgentRun).filter(AgentRun.task_id == task_id).first()
+        if agent_run:
+            agent_run.status = "complete"
+            agent_run.updated_at = func.now()
+        msgs = db.query(Message).filter(Message.role == "assistant").order_by(Message.created_at.desc()).limit(30).all()
+        for m in msgs:
+            if m.meta and m.meta.get("task_id") == task_id:
+                meta = dict(m.meta or {})
+                meta["approval_outcome"] = {
+                    "approved": True,
+                    "decision": decision,
+                    "filename": filename,
+                    "file_path": str(file_path),
+                    "title": content_to_render.get("title") or filename,
+                }
+                m.meta = meta
+                break
+        db.commit()
+    except Exception as exc:
+        print(f"[WARN] Failed to persist approval outcome in DB: {exc}", flush=True)
+
     return {
         "task_id": task_id,
         "status": resolved["status"],
@@ -702,8 +788,11 @@ def knowledge_list():
     if not METADATA_PATH.exists():
         return {"documents": [], "total_chunks": 0}
 
-    with open(METADATA_PATH, "r", encoding="utf-8") as f:
-        metadata = json.load(f)
+    try:
+        with open(METADATA_PATH, "r", encoding="utf-8") as f:
+            metadata = json.load(f)
+    except Exception as exc:
+        return {"documents": [], "total_chunks": 0, "error": f"Metadata read error: {exc}"}
 
     counts: dict = {}
     for entry in metadata:
@@ -727,9 +816,12 @@ def knowledge_upload(file: UploadFile = File(...), ingest: bool = Form(True)):
             detail=f"Unsupported file type '{suffix}'. Supported: {sorted(SUPPORTED_EXTENSIONS)}",
         )
 
-    content = file.file.read()
-    dest = UPLOADS_DIR / safe_name
-    dest.write_bytes(content)
+    try:
+        content = file.file.read()
+        dest = UPLOADS_DIR / safe_name
+        dest.write_bytes(content)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to save uploaded file: {exc}")
 
     log_event(
         event_type="upload",
@@ -740,15 +832,39 @@ def knowledge_upload(file: UploadFile = File(...), ingest: bool = Form(True)):
     )
 
     if not ingest:
-        return {"filename": safe_name, "file_path": str(dest), "ingested": False, "chunk_count": 0}
+        return {
+            "filename": safe_name,
+            "file_path": str(dest),
+            "ingested": False,
+            "chunk_count": 0,
+            "chunks_created": 0,
+        }
 
-    result = ingest_document(dest)  # logs its own "ingest" audit event
-    return {
-        "filename": safe_name,
-        "file_path": str(dest),
-        "ingested": True,
-        "chunk_count": result["chunk_count"],
-    }
+    try:
+        result = ingest_document(dest)  # logs its own "ingest" audit event
+        chunk_count = result.get("chunk_count", 0)
+        return {
+            "filename": safe_name,
+            "file_path": str(dest),
+            "ingested": True,
+            "chunk_count": chunk_count,
+            "chunks_created": chunk_count,
+        }
+    except ollama.OllamaError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Local embedding service error: {exc}",
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Document ingestion error: {exc}",
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to ingest document into knowledge vault: {exc}",
+        )
 
 
 @app.get("/shield/status")

@@ -22,6 +22,8 @@ from backend.tools.ocr import extract_text as ocr_tool_extract
 from backend.tools.search import search as search_tool
 from backend.tools.vision import describe_image as vision_tool_describe
 from backend.tools.writer import draft_document, render_docx
+import time
+from backend.terminal_logger import log_tool, _truncate
 
 logger = logging.getLogger("kavach.tools_dispatch")
 CODE_TIMEOUT_SECONDS = 15
@@ -31,6 +33,14 @@ IMAGE_PATTERN = r"([A-Za-z]:\\[^\r\n<>:\"|?*]+\.(?:png|jpg|jpeg|bmp|tiff|webp)|\
 def _extract_key_facts(tool: str, output: str, meta: Dict[str, Any], is_error: bool) -> Dict[str, Any]:
     """Extract deterministic or structured key facts from tool outputs for agent memory."""
     facts: Dict[str, Any] = {}
+    if meta.get("needs_clarification"):
+        facts["needs_clarification"] = True
+        if meta.get("clarify_question"):
+            facts["clarify_question"] = meta.get("clarify_question")
+    elif not is_error:
+        facts["needs_clarification"] = False
+        facts["clarify_question"] = None
+
     if is_error:
         facts[f"last_error_{tool}"] = output[:300]
         return facts
@@ -98,6 +108,8 @@ def dispatch_tool(
     sources: Optional[List[Dict[str, Any]]] = None
 
     # Inject accumulated structured key_facts into step_input context if not already present
+    t0 = time.perf_counter()
+    log_tool(tool, "DISPATCH", f"Input: '{_truncate(step_input, 85)}'")
     key_facts_ctx = state.get("key_facts", {})
     injected_input = step_input
     if key_facts_ctx and tool in ("calc", "code", "document", "llm"):
@@ -146,6 +158,7 @@ def dispatch_tool(
         prior_context_list = [o["output"] for o in state.get("step_outputs", [])]
         context_str = "\n".join(prior_context_list) if prior_context_list else None
         calc_res = calc_tool(injected_input, context=context_str, task_id=state.get("task_id"))
+        missing = calc_res.get("missing_inputs") or []
         if calc_res.get("success"):
             output = f"Calculation '{calc_res['formula_name']}':\n" + "\n".join(calc_res.get("steps", []))
             is_error = False
@@ -156,6 +169,12 @@ def dispatch_tool(
             "calc_result": calc_res.get("result"),
             "formula_name": calc_res.get("formula_name"),
             "unit": calc_res.get("unit"),
+            "missing_inputs": missing,
+            "needs_clarification": bool(missing),
+            "clarify_question": (
+                f"To calculate {calc_res.get('formula_name', 'the result')}, please provide the following missing parameter(s): {', '.join(missing)}."
+                if missing else None
+            ),
         }
 
     elif tool == "ocr":
@@ -356,6 +375,9 @@ def dispatch_tool(
     # Extract structured key facts
     combined_meta = {**doc_meta, **code_meta, **extra_meta, "sources": sources, "grounded": is_grounded_flag}
     extracted_facts = _extract_key_facts(tool, output, combined_meta, is_error)
+
+    elapsed = time.perf_counter() - t0
+    log_tool(tool, "RESULT", f"Output: '{_truncate(output, 85)}'", elapsed_s=elapsed, is_error=is_error)
 
     return {
         "output": output,
