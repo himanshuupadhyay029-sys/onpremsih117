@@ -73,6 +73,36 @@ def generate(model: str, prompt: str, system: Optional[str] = None) -> str:
         raise OllamaError(f"Ollama generation failed: {exc}") from exc
 
 
+def chat(model: str, messages: List[Dict[str, str]]) -> str:
+    """Invokes Ollama /api/chat with structured conversation messages using model's native chat template."""
+    payload: Dict[str, Any] = {
+        "model": model,
+        "messages": messages,
+        "stream": False,
+    }
+    try:
+        with _get_client(timeout=180.0) as client:
+            resp = client.post("/api/chat", json=payload)
+            resp.raise_for_status()
+            data = resp.json()
+            msg = data.get("message", {})
+            text = msg.get("content", "").strip()
+            if not text:
+                raise OllamaError(f"Ollama model '{model}' returned an empty chat message.")
+            return text
+    except OllamaError:
+        raise
+    except httpx.ConnectError as exc:
+        raise OllamaError(
+            f"Cannot connect to local Ollama at {config.OLLAMA_BASE_URL}. "
+            "Please ensure Ollama is running (`ollama serve`)."
+        ) from exc
+    except httpx.HTTPStatusError as exc:
+        raise OllamaError(f"Ollama returned HTTP error: {exc.response.status_code} - {exc.response.text}") from exc
+    except Exception as exc:
+        raise OllamaError(f"Ollama chat call failed: {exc}") from exc
+
+
 def embed(model: str, text: str) -> List[float]:
     """Generates vector embeddings for a given text using a local embedding model."""
     payload: Dict[str, Any] = {

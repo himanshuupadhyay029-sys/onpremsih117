@@ -147,8 +147,14 @@ def dispatch_tool(
         sources = result.get("sources", [])
         is_grounded_flag = result.get("grounded", True)
         if sources:
-            filenames = ", ".join(sorted({s["filename"] for s in sources if "filename" in s}))
-            output = f"{answer}\n\n[Sources: {filenames}]"
+            source_labels = []
+            for s in sources:
+                label = f"[{s.get('id', 1)}] {s.get('filename')}"
+                if s.get("breadcrumb") and s.get("breadcrumb") != s.get("filename"):
+                    label += f" ({s.get('breadcrumb')})"
+                source_labels.append(label)
+            sources_summary = "\n".join(f"  • {lbl}" for lbl in source_labels)
+            output = f"{answer}\n\n**Referenced Sources:**\n{sources_summary}"
         else:
             output = answer
         is_error = False

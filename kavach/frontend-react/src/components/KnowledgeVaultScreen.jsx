@@ -5,6 +5,8 @@ export default function KnowledgeVaultScreen() {
   const [totalChunks, setTotalChunks] = useState(0);
   const [loading, setLoading] = useState(true);
   const [uploadStatus, setUploadStatus] = useState('');
+  const [docToDelete, setDocToDelete] = useState(null); // { filename, chunk_count }
+  const [isDeleting, setIsDeleting] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
   const fileInputRef = useRef(null);
 
@@ -26,6 +28,17 @@ export default function KnowledgeVaultScreen() {
   useEffect(() => {
     fetchKnowledgeList();
   }, []);
+
+  // Handle ESC key to dismiss confirmation popup
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape' && docToDelete && !isDeleting) {
+        setDocToDelete(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [docToDelete, isDeleting]);
 
   const uploadFile = async (file) => {
     if (!file) return;
@@ -69,6 +82,29 @@ export default function KnowledgeVaultScreen() {
     }
   };
 
+  const handleConfirmDelete = async () => {
+    if (!docToDelete) return;
+    const filename = docToDelete.filename;
+    setIsDeleting(true);
+
+    try {
+      const res = await fetch(`/knowledge/${encodeURIComponent(filename)}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Failed to delete document');
+
+      setDocToDelete(null);
+      setUploadStatus(`✓ Successfully removed "${filename}" from Knowledge Vault.`);
+      await fetchKnowledgeList();
+      setTimeout(() => setUploadStatus(''), 6000);
+    } catch (err) {
+      setUploadStatus(`Failed to remove document: ${err.message}`);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   const handleDrop = (e) => {
     e.preventDefault();
     setIsDragOver(false);
@@ -92,7 +128,7 @@ export default function KnowledgeVaultScreen() {
       <div className="screen-head">
         <h2 className="screen-title">Knowledge Vault</h2>
         <p className="screen-sub">
-          Uploaded documents are chunked and vectorized into a local FAISS index.
+          Uploaded documents are chunked and vectorized into a local FAISS index + BM25 sparse index.
           All embeddings stay on-device.
         </p>
       </div>
@@ -111,7 +147,7 @@ export default function KnowledgeVaultScreen() {
         </svg>
         <span>Drop files here or click to browse</span>
         <span className="dropzone-hint">
-          Supports .txt, .md, .pdf, and image files (.png, .jpg) via OCR
+          Supports .txt, .md, .pdf, .docx, and image files (.png, .jpg) via OCR
         </span>
         <input
           type="file"
@@ -141,20 +177,137 @@ export default function KnowledgeVaultScreen() {
             No documents indexed yet. Upload a file above to add it to the vault.
           </div>
         ) : (
-          documents.map((doc, idx) => (
-            <div key={idx} className="doc-row">
-              <svg className="icon icon-sm" viewBox="0 0 24 24">
-                <path d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8l-5-5z" />
-                <path d="M14 3v5h5" />
-              </svg>
-              <span className="doc-name">{doc.filename || doc.source_filename || 'Document'}</span>
-              <span className="doc-chunks">
-                {doc.chunk_count} chunk{doc.chunk_count === 1 ? '' : 's'}
-              </span>
-            </div>
-          ))
+          documents.map((doc, idx) => {
+            const fname = doc.filename || doc.source_filename || 'Document';
+            return (
+              <div key={idx} className="doc-row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  <svg className="icon icon-sm" viewBox="0 0 24 24" style={{ flexShrink: 0 }}>
+                    <path d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8l-5-5z" />
+                    <path d="M14 3v5h5" />
+                  </svg>
+                  <span className="doc-name" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {fname}
+                  </span>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
+                  <span className="doc-chunks">
+                    {doc.chunk_count} chunk{doc.chunk_count === 1 ? '' : 's'}
+                  </span>
+                  <button
+                    className="doc-delete-btn"
+                    title={`Remove "${fname}" from Knowledge Vault`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDocToDelete({ filename: fname, chunk_count: doc.chunk_count });
+                    }}
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      color: 'var(--text-muted, #888)',
+                      cursor: 'pointer',
+                      padding: '4px 6px',
+                      borderRadius: '4px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      transition: 'color 0.15s, background 0.15s',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.color = '#ef4444';
+                      e.currentTarget.style.background = 'rgba(239, 68, 68, 0.15)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.color = 'var(--text-muted, #888)';
+                      e.currentTarget.style.background = 'transparent';
+                    }}
+                  >
+                    <svg className="icon icon-sm" viewBox="0 0 24 24" style={{ width: '16px', height: '16px', stroke: 'currentColor', fill: 'none', strokeWidth: '2' }}>
+                      <polyline points="3 6 5 6 21 6" />
+                      <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
+                      <line x1="10" y1="11" x2="10" y2="17" />
+                      <line x1="14" y1="11" x2="14" y2="17" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            );
+          })
         )}
       </div>
+
+      {/* Platform In-App Confirmation Modal */}
+      {docToDelete && (
+        <div
+          className="confirm-overlay"
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !isDeleting) {
+              setDocToDelete(null);
+            }
+          }}
+        >
+          <div className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-modal-title">
+            <div className="confirm-header">
+              <div className="confirm-icon-box">
+                <svg viewBox="0 0 24 24">
+                  <polyline points="3 6 5 6 21 6" />
+                  <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
+                  <line x1="10" y1="11" x2="10" y2="17" />
+                  <line x1="14" y1="11" x2="14" y2="17" />
+                </svg>
+              </div>
+              <div className="confirm-title-area">
+                <h3 className="confirm-title" id="confirm-modal-title">Remove Document from Vault</h3>
+                <p className="confirm-desc">
+                  Are you sure you want to remove <span className="confirm-file-badge">{docToDelete.filename}</span> ({docToDelete.chunk_count} chunk{docToDelete.chunk_count === 1 ? '' : 's'})?
+                </p>
+              </div>
+            </div>
+
+            <div className="confirm-warning-box">
+              <svg className="icon icon-sm" viewBox="0 0 24 24" style={{ width: '16px', height: '16px', stroke: 'currentColor', fill: 'none', flexShrink: 0 }}>
+                <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                <line x1="12" y1="9" x2="12" y2="13" />
+                <line x1="12" y1="17" x2="12.01" y2="17" />
+              </svg>
+              <span>This will delete its vector embeddings, BM25 keywords, and local file permanently.</span>
+            </div>
+
+            <div className="confirm-actions">
+              <button
+                type="button"
+                className="confirm-btn-cancel"
+                onClick={() => setDocToDelete(null)}
+                disabled={isDeleting}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="confirm-btn-danger"
+                onClick={handleConfirmDelete}
+                disabled={isDeleting}
+              >
+                {isDeleting ? (
+                  <>
+                    <span className="auth-spinner" style={{ width: '14px', height: '14px', borderWidth: '2px' }} />
+                    <span>Removing…</span>
+                  </>
+                ) : (
+                  <>
+                    <svg className="icon icon-sm" viewBox="0 0 24 24" style={{ width: '14px', height: '14px', stroke: 'currentColor', fill: 'none' }}>
+                      <polyline points="3 6 5 6 21 6" />
+                      <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
+                    </svg>
+                    <span>Remove Document</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }
+
