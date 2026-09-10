@@ -128,7 +128,6 @@ def embed_batch(model: str, texts: List[str]) -> List[List[float]]:
     return [embed(model, t) for t in texts]
 
 
-
 def vision(model: str, prompt: str, image_path: Union[str, Path], system: Optional[str] = None) -> str:
     """Performs multimodal visual analysis on an image file using a local vision model."""
     active_system = system if system is not None else VISION_SYSTEM_PROMPT

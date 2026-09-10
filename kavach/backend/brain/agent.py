@@ -160,18 +160,21 @@ Accumulated Key Facts from Workflow:
 {key_facts_json}
 
 CRITICAL RULES FOR DECIDING ACTION:
-1. END-OF-PLAN CHECK: If this is Step #{step_num} of {total_steps} (the LAST step in the current plan):
+1. IF NOT THE LAST STEP (Step #{step_num} < {total_steps}):
+   - You MUST NOT choose "done"! The Master Plan still has pending steps that must be executed.
+   - If the current step succeeded or made acceptable progress, choose "continue" to proceed to the next step.
+   - If the step failed with an error, choose "retry" (with retry_instruction) or "replan".
+2. IF THIS IS THE LAST STEP (Step #{step_num} of {total_steps}):
    - NEVER choose "continue"! ("continue" is only valid if another step already exists in the Master Plan).
    - If ALL parts of the Original User Task have been satisfied, select "done".
-   - If ANY part of the Original User Task remains unfulfilled (such as writing code, running a script, writing a poem, drafting a document, or computing values), you MUST select "replan" and provide the uncompleted task(s) in "new_steps"!
-2. IF NOT THE LAST STEP: If the current step succeeded or made acceptable progress, choose "continue".
+   - If ANY part of the Original User Task remains unfulfilled (such as writing code, running a script, drafting a document, or explaining/computing values), you MUST select "replan" and provide the uncompleted task(s) in "new_steps"!
 3. IF STEP ENCOUNTERED AN ERROR: Choose "retry" and provide a refined instruction in "retry_instruction", or "replan" to change course.
 
 Available Actions:
-- "continue": The step succeeded and an existing next step is already in the Master Plan. Proceed to that step.
+- "continue": ONLY VALID IF #{step_num} < {total_steps}. The current step succeeded and more steps remain in the Master Plan.
 - "replan": Unfulfilled user goals remain missing from the plan, or execution output revealed new requirements. Provide remaining steps in "new_steps".
 - "retry": The step encountered a fixable failure or error. Provide refined instruction in "retry_instruction".
-- "done": All parts of the user's request have been fully and completely answered or satisfied. End execution cleanly.
+- "done": ONLY VALID ON THE LAST STEP (#{total_steps} of {total_steps}) when all planned steps have completed and the user's request is satisfied.
 - "clarify": Crucial ambiguity prevents completing the task, requiring user input. Provide the specific question in "clarify_question".
 
 Respond with ONLY a valid JSON object matching this schema. No markdown formatting, no other text:
@@ -961,18 +964,31 @@ def observe_node(state: AgentState) -> dict:
                 "observe_decision": observe_decision,
             }
 
+    # Deterministic Multi-Step Guard:
+    # If the LLM returns "done" but there are still unexecuted steps remaining in the Master Plan,
+    # override "done" to "continue" to guarantee all planned sub-tasks run to completion.
     if action == "done":
-        trace_entries.append({"role": "thought", "content": f"Workflow goal satisfied early or completed: {reasoning}"})
-        emit_sync(
-            state.get("task_id"),
-            "observe",
-            {"task_id": state.get("task_id"), "action": "done", "reasoning": reasoning, "status": "complete"},
-        )
-        return {
-            "trace": trace_entries,
-            "status": "complete",
-            "observe_decision": observe_decision,
-        }
+        if next_step < len(state["plan"]):
+            _log_terminal(
+                "Observer",
+                f"[GUARD] Overriding LLM decision 'DONE' to 'CONTINUE': {len(state['plan']) - next_step} planned step(s) remain in Master Plan.",
+            )
+            action = "continue"
+            reasoning = f"Step {last_output['step_num']} completed; continuing with pending Step {next_step + 1}/{len(state['plan'])}."
+            observe_decision["action"] = "continue"
+            observe_decision["reasoning"] = reasoning
+        else:
+            trace_entries.append({"role": "thought", "content": f"Workflow goal satisfied or completed: {reasoning}"})
+            emit_sync(
+                state.get("task_id"),
+                "observe",
+                {"task_id": state.get("task_id"), "action": "done", "reasoning": reasoning, "status": "complete"},
+            )
+            return {
+                "trace": trace_entries,
+                "status": "complete",
+                "observe_decision": observe_decision,
+            }
 
     # Default action: continue
     if next_step < len(state["plan"]):
