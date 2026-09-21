@@ -25,7 +25,7 @@ GENERATE_PROMPTS = {
 Requirements:
 - Return ONLY the raw Python code. No markdown code fences, no explanation, no comments about what you are doing.
 - The script must run standalone with `python script.py` and print its result(s) to stdout.
-- If interactive user input is needed, try to read from input() but always handle EOFError or empty input with sensible default test values so the script executes reliably.
+- NON-INTERACTIVE EXECUTION: The script runs in a headless sandbox with NO interactive keyboard input (stdin is closed). NEVER use interactive input() or while True input loops. Hardcode all test variables, constants, or function arguments directly in the script.
 - Use only the Python standard library — the execution sandbox has no network access, so third-party packages cannot be installed.
 """,
     "javascript": """Write a complete, self-contained Node.js / JavaScript script that accomplishes the following task:
@@ -35,6 +35,7 @@ Requirements:
 Requirements:
 - Return ONLY the raw JavaScript code. No markdown code fences, no explanation, no comments about what you are doing.
 - The script must run standalone with `node script.js` and print its result(s) to stdout using console.log.
+- NON-INTERACTIVE EXECUTION: Hardcode all test variables and parameters directly in the script. Do not wait for stdin.
 - Use only built-in Node.js standard modules — no external npm packages can be installed.
 """,
     "c": """Write a complete, self-contained C source file that accomplishes the following task:
@@ -45,6 +46,7 @@ Requirements:
 - Return ONLY the raw C source code. No markdown code fences, no explanation.
 - Include all necessary standard headers (e.g. #include <stdio.h>, #include <stdlib.h>, #include <string.h>, #include <math.h>).
 - Implement a complete int main() entry function that prints its result(s) to stdout via printf and returns 0.
+- NON-INTERACTIVE: Hardcode sample values or arguments.
 - Use only the C standard library.
 """,
 }
@@ -63,7 +65,7 @@ Fix the specific problem shown in that error and write a corrected, complete scr
 Requirements:
 - Return ONLY the raw Python code. No markdown code fences, no explanation.
 - The script must run standalone with `python script.py` and print its result(s) to stdout.
-- If the error was an EOFError or empty input, ensure input() has a try-except fallback to sensible default values.
+- NON-INTERACTIVE: If the error was an EOFError or timeout, completely eliminate all input() calls and hardcode sample values or function parameters directly so the script executes immediately.
 - Use only the Python standard library — no network access is available to install packages.
 """,
     "javascript": """Write a complete, self-contained Node.js / JavaScript script that accomplishes the following task:

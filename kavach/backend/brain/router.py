@@ -48,9 +48,13 @@ _KEYWORDS = {
         "write a function", "implement a",
     ],
     "calc": [
-        "calculate", "compute", "sum of", "average", "mean of", "median",
-        "percentage", "how much is", "math problem", "equation", "solve for",
+        "calculate", "calc ", "calculation", "compute", "sum of", "average", "mean of", "median",
+        "percentage", "how much is", "math problem", "math", "equation", "solve for", "solve ",
         "arithmetic", "multiply", "divide", "add up", "square root",
+        "distance", "speed", "velocity", "mph", "km/h", "kmh", "miles", "total distance",
+        "verify if", "verify whether", "is this correct", "check if this is correct", "verify step-by-step",
+        "formula", "corrosion rate", "remaining life", "wall thickness",
+        "plus", "minus", "times", "divided by", "convert minutes", "convert hours",
     ],
     "search": [
         "search for", "look up", "find information", "find out", "retrieve",
@@ -123,7 +127,15 @@ def _llm_classify(task: str) -> str:
     model = registry.get_model("reasoning")
     prompt = (
         "Classify the user's task into exactly one category word from this list: "
-        "document, code, calc, search, vision, ocr, llm.\n"
+        "document, code, calc, search, vision, ocr, llm.\n\n"
+        "Guidelines:\n"
+        "- 'calc': arithmetic, formulas, math verification, numerical word problems (speed, distance, conversions).\n"
+        "- 'code': writing or executing Python/JS/C programming scripts.\n"
+        "- 'document': drafting formal reports or Word documents.\n"
+        "- 'search': looking up SOPs or procedures in the Knowledge Vault.\n"
+        "- 'vision': analyzing an image.\n"
+        "- 'ocr': extracting text from scanned images.\n"
+        "- 'llm': general knowledge chat.\n\n"
         "Respond with ONLY that single lowercase word — no punctuation, no explanation.\n\n"
         f"Task: {task}"
     )

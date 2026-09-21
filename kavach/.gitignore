@@ -39,6 +39,8 @@ testdata/synthetic_scans/
 
 # Documentation ignored per user request
 TECHNICAL_CONTEXT.md
+KAVACH_Final_Merged_Architecture.md
+ARCHITECTURE_MASTER_CONTEXT.md
 
 # IDE & OS files
 .vscode/
@@ -46,4 +48,7 @@ TECHNICAL_CONTEXT.md
 .DS_Store
 Thumbs.db
 *.tmp
+
+# Internal audit working documents
+KAVACH_AGENT_AUDIT.md
 

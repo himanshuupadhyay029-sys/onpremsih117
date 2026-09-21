@@ -134,6 +134,14 @@ Output:
   {{"step_num": 3, "tool": "document", "input": "Draft formal inspection report on Tank-4 remaining lifespan"}}
 ]
 
+Request: "A car travels at 60 mph for 45 minutes and then 40 mph for 30 minutes. The total distance covered is 65 miles. Verify if this is correct step-by-step and create a summary."
+Output:
+[
+  {{"step_num": 1, "tool": "calc", "input": "Calculate distance for leg 1: speed 60 mph for 45 minutes (45/60 hours)"}},
+  {{"step_num": 2, "tool": "calc", "input": "Calculate distance for leg 2: speed 40 mph for 30 minutes (30/60 hours)"}},
+  {{"step_num": 3, "tool": "calc", "input": "Calculate total distance: leg1_distance + leg2_distance and verify against 65 miles"}}
+]
+
 {history_section}User Request: {task}
 {attachment_info}
 
@@ -168,7 +176,8 @@ CRITICAL RULES FOR DECIDING ACTION:
    - NEVER choose "continue"! ("continue" is only valid if another step already exists in the Master Plan).
    - If ALL parts of the Original User Task have been satisfied, select "done".
    - If ANY part of the Original User Task remains unfulfilled (such as writing code, running a script, drafting a document, or explaining/computing values), you MUST select "replan" and provide the uncompleted task(s) in "new_steps"!
-3. IF STEP ENCOUNTERED AN ERROR: Choose "retry" and provide a refined instruction in "retry_instruction", or "replan" to change course.
+3. IF STEP ENCOUNTERED AN ERROR: Choose "retry" and provide a refined instruction in "retry_instruction".
+   - For calculation errors: retry using 'calc' with pure arithmetic formulas. NEVER switch to 'code' scripts unless the user specifically asked for code.
 
 Available Actions:
 - "continue": ONLY VALID IF #{step_num} < {total_steps}. The current step succeeded and more steps remain in the Master Plan.
@@ -388,7 +397,7 @@ def _parse_master_plan(
         elif has_code_intent:
             fallback_tool = "code"
             parsed_steps = [{"step_num": 1, "tool": fallback_tool, "input": original_task, "status": "pending"}]
-        elif any(w in task_lower for w in ["calculate", "compute", "arithmetic", "sum of", "solve for"]):
+        elif any(w in task_lower for w in ["calculate", "calc", "compute", "arithmetic", "sum of", "solve for", "mph", "miles", "distance", "speed", "total distance", "verify if"]):
             fallback_tool = "calc"
             parsed_steps = [{"step_num": 1, "tool": fallback_tool, "input": original_task, "status": "pending"}]
         elif has_doc_intent:
@@ -1163,7 +1172,12 @@ def revise_node(state: AgentState) -> dict:
     elif tool == "search":
         step["input"] = f"{state['original_task']} (broad search)"
     elif tool == "calc":
-        step["input"] = f"{step['input']} (extract missing numeric values from context)"
+        err_msg = last.get("output") or "Calculation failed"
+        step["input"] = (
+            f"{step['input']}\n\n"
+            f"[Correction Instruction]: The previous attempt resulted in an error:\n{err_msg}\n"
+            f"Provide a valid Python arithmetic expression and exact numeric values from context without equals signs or variable assignments."
+        )
     else:
         step["input"] = f"{step['input']} (retry attempt)"
 

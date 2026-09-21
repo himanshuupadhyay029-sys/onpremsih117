@@ -18,17 +18,54 @@ from backend.engine import ollama, registry
 import time
 from backend.terminal_logger import log_tool, _truncate
 
-CALC_IDENTIFY_PROMPT = """You are an engineering formula identification assistant. Extract the mathematical formula, variable values, and units from the task and context.
+CALC_IDENTIFY_PROMPT = """You are an engineering and mathematical calculation assistant. Extract the mathematical formula, variable values, and units from the task and context.
 
 Task: {task_description}
 Context: {context}
 
-Rules:
-1. Extract ONLY numeric values that are explicitly written in the task description or context.
-2. If any parameter needed for the formula is NOT mentioned in the task/context, do NOT invent or assume a number — list that variable name in "missing_inputs".
-3. If all required numbers are present, "missing_inputs" must be [].
+CRITICAL RULES:
+1. "formula_expression" must be a PURE, VALID Python arithmetic expression (e.g. "speed * (time_minutes / 60)" or "speed * time_hours" or "(current_thickness - min_thickness) / corrosion_rate" or "leg1_distance + leg2_distance").
+2. NEVER include equals signs ('=') or variable assignment in "formula_expression" (e.g. write "speed * (time / 60)", NEVER "Distance = speed * time" or "60 * 0.75 = 45").
+3. NEVER include unit words in "formula_expression" (e.g. write "60 * (45 / 60)", NEVER "60 mph * 45 mins").
+4. Extract ONLY numeric values that are explicitly written in the task description or context into "inputs".
+5. If any parameter needed for the formula is NOT mentioned, list that variable in "missing_inputs". If all required numbers are present, "missing_inputs" must be [].
 
-Return ONLY a raw JSON object with this schema:
+Examples:
+
+Example 1:
+Task: Calculate distance traveled for a car at 60 mph for 45 minutes
+Context: None
+Output:
+{{
+  "formula_name": "Distance Traveled",
+  "formula_expression": "speed * (time_minutes / 60)",
+  "inputs": {{
+    "speed": 60,
+    "time_minutes": 45
+  }},
+  "unit": "miles",
+  "missing_inputs": []
+}}
+
+Example 2:
+Task: Calculate total distance: 45 miles + 20 miles
+Context: None
+Output:
+{{
+  "formula_name": "Total Distance",
+  "formula_expression": "leg1 + leg2",
+  "inputs": {{
+    "leg1": 45,
+    "leg2": 20
+  }},
+  "unit": "miles",
+  "missing_inputs": []
+}}
+
+Example 3:
+Task: Calculate remaining pipe life where current thickness is 12.5 mm, minimum required thickness is 8.0 mm, and corrosion rate is 0.4 mm/year.
+Context: None
+Output:
 {{
   "formula_name": "Remaining Pipe Life",
   "formula_expression": "(current_thickness - min_thickness) / corrosion_rate",
@@ -40,6 +77,8 @@ Return ONLY a raw JSON object with this schema:
   "unit": "years",
   "missing_inputs": []
 }}
+
+Return ONLY a raw JSON object matching this schema:
 """
 
 # Supported safe arithmetic operators for AST evaluation
@@ -54,6 +93,64 @@ SAFE_OPERATORS = {
     ast.USub: operator.neg,
     ast.UAdd: operator.pos,
 }
+
+# Units to strip out of arithmetic expressions
+_UNIT_WORDS = [
+    "mph", "km/h", "kmh", "km", "miles", "mile", "meters", "meter", "m",
+    "hours", "hour", "hrs", "hr", "h", "minutes", "minute", "mins", "min",
+    "seconds", "second", "sec", "s", "years", "year", "yrs", "yr",
+    "mm", "cm", "psi", "bar", "pa", "kpa", "mpa", "kg", "g", "liters", "litres", "l"
+]
+
+
+def _sanitize_expression(expr: str, inputs: Optional[Dict[str, float]] = None) -> str:
+    """Robustly cleans LLM mathematical expressions into valid Python AST mode='eval' syntax."""
+    if not expr:
+        return ""
+
+    s = expr.strip()
+    # Strip markdown backticks
+    s = re.sub(r"^`+|`+$", "", s).strip()
+
+    # If the expression contains equality '=', extract the expression side
+    if "=" in s:
+        parts = [p.strip() for p in s.split("=")]
+        # Check if first part is a variable assignment like "Distance = speed * time"
+        if len(parts) >= 2:
+            left, right = parts[0], parts[1]
+            left_has_ops = any(op in left for op in ["+", "-", "*", "/", "^", "**"])
+            right_has_ops = any(op in right for op in ["+", "-", "*", "/", "^", "**"])
+            
+            # If right side has operators or is a formula, take right side (e.g. Distance = speed * time)
+            if right_has_ops and not left_has_ops:
+                s = right
+            # If left side has operators (e.g. 60 * 0.75 = 45 or 45 + 20 = 65), take left side
+            elif left_has_ops and not right_has_ops:
+                s = left
+            else:
+                # If both or neither have operators, check if left is a single identifier
+                if re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", left):
+                    s = right
+                else:
+                    s = left
+
+    # Replace mathematical symbols with Python operators
+    s = s.replace("^", "**").replace("×", "*").replace("÷", "/")
+    
+    # Replace word operators if present
+    s = re.sub(r"\bplus\b", "+", s, flags=re.IGNORECASE)
+    s = re.sub(r"\bminus\b", "-", s, flags=re.IGNORECASE)
+    s = re.sub(r"\btimes\b", "*", s, flags=re.IGNORECASE)
+    s = re.sub(r"\bmultiplied\s+by\b", "*", s, flags=re.IGNORECASE)
+    s = re.sub(r"\bdivided\s+by\b", "/", s, flags=re.IGNORECASE)
+
+    # Strip standalone unit words from the expression (e.g. "60 mph * 0.75 hours" -> "60 * 0.75")
+    for unit_w in _UNIT_WORDS:
+        s = re.sub(rf"(?<=\d|\))\s*\b{re.escape(unit_w)}\b", "", s, flags=re.IGNORECASE)
+        s = re.sub(rf"\b{re.escape(unit_w)}\b\s*(?=\d|\()", "", s, flags=re.IGNORECASE)
+
+    s = s.strip()
+    return s
 
 
 def _ground_inputs_in_text(inputs: Dict[str, float], text_corpus: str) -> Tuple[Dict[str, float], List[str]]:
@@ -119,9 +216,11 @@ def _parse_calc_json(raw: str, text_corpus: str = "") -> Dict[str, Any]:
                 if m_str and not any(re.sub(r"[^a-zA-Z0-9]", "", k).lower() == re.sub(r"[^a-zA-Z0-9]", "", m_str).lower() for k in grounded_inputs):
                     missing_set.add(m_str)
 
+            formula_expr = _sanitize_expression(str(data.get("formula_expression", "")), grounded_inputs)
+
             return {
                 "formula_name": str(data.get("formula_name", "Calculation")),
-                "formula_expression": str(data.get("formula_expression", "")),
+                "formula_expression": formula_expr,
                 "inputs": grounded_inputs,
                 "unit": str(data.get("unit", "")),
                 "missing_inputs": sorted(list(missing_set)),
@@ -219,11 +318,13 @@ class SafeEvaluator(ast.NodeVisitor):
 def compute(structured_calc: Dict[str, Any]) -> Dict[str, Any]:
     """Deterministically evaluates arithmetic formula using safe AST parsing."""
     formula_name = structured_calc.get("formula_name", "Calculation")
-    expr = structured_calc.get("formula_expression", "").strip()
+    raw_expr = structured_calc.get("formula_expression", "").strip()
     inputs = structured_calc.get("inputs", {})
     unit = structured_calc.get("unit", "")
 
-    if not expr:
+    clean_expr = _sanitize_expression(raw_expr, inputs)
+
+    if not clean_expr:
         return {
             "success": False,
             "error": "No valid formula expression identified for calculation.",
@@ -233,7 +334,6 @@ def compute(structured_calc: Dict[str, Any]) -> Dict[str, Any]:
             "unit": unit,
         }
 
-    clean_expr = expr.replace("^", "**").strip()
     try:
         tree = ast.parse(clean_expr, mode="eval")
     except Exception as exc:
@@ -272,18 +372,18 @@ def compute(structured_calc: Dict[str, Any]) -> Dict[str, Any]:
         }
 
     steps: List[str] = [
-        f"1. Formula: {formula_name} = {expr}",
+        f"1. Formula: {formula_name} = {clean_expr}",
     ]
 
     # Create substitution string
-    subst_expr = expr
+    subst_expr = clean_expr
     for var, val in inputs.items():
         subst_expr = re.sub(rf"\b{re.escape(var)}\b", str(val), subst_expr)
     steps.append(f"2. Substitution: {subst_expr}")
 
     try:
         evaluator = SafeEvaluator(inputs)
-        result_num, sub_steps = evaluator.evaluate(expr)
+        result_num, sub_steps = evaluator.evaluate(clean_expr)
 
         for i, sub in enumerate(sub_steps, start=3):
             steps.append(f"{i}. Arithmetic: {sub}")
@@ -298,7 +398,7 @@ def compute(structured_calc: Dict[str, Any]) -> Dict[str, Any]:
         return {
             "success": True,
             "formula_name": formula_name,
-            "formula_expression": expr,
+            "formula_expression": clean_expr,
             "inputs": inputs,
             "steps": steps,
             "result": rounded_res,

@@ -44,6 +44,10 @@ kavach/testdata/synthetic_scans/
 TECHNICAL_CONTEXT.md
 kavach/TECHNICAL_CONTEXT.md
 kavach/test_vision_fix.py
+KAVACH_Final_Merged_Architecture.md
+kavach/KAVACH_Final_Merged_Architecture.md
+ARCHITECTURE_MASTER_CONTEXT.md
+kavach/ARCHITECTURE_MASTER_CONTEXT.md
 
 # IDE & OS files
 .vscode/
