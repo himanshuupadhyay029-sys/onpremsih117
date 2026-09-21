@@ -13,14 +13,15 @@ import logging
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
-import faiss
 import numpy as np
 
 import time
+from backend.engine import ollama, registry
 from backend.terminal_logger import log_tool
 from backend.vault.bm25 import BM25Index
 from backend.vault.ingest import BM25_PATH, INDEX_PATH, METADATA_PATH
 from backend.vault.rerank import rerank as cross_encoder_rerank
+from backend.vault.vector_store import deserialize_index
 
 logger = logging.getLogger("kavach.retrieve")
 
@@ -41,7 +42,7 @@ def _load_all_stores():
         try:
             raw_bytes = INDEX_PATH.read_bytes()
             if raw_bytes:
-                index = faiss.deserialize_index(np.frombuffer(raw_bytes, dtype=np.uint8))
+                index = deserialize_index(raw_bytes)
                 with open(METADATA_PATH, "r", encoding="utf-8") as f:
                     metadata = json.load(f)
         except Exception:

@@ -15,13 +15,13 @@ import re
 import threading
 from typing import Dict, List, Tuple, Union
 
-import faiss
 import numpy as np
 
 from backend import config
 from backend.audit.logbook import log_event
 from backend.engine import ollama, registry
 from backend.vault.bm25 import BM25Index
+from backend.vault.vector_store import IndexFlatL2, serialize_index, deserialize_index
 
 _lock = threading.Lock()
 
@@ -216,7 +216,7 @@ def _load_all_indices():
         try:
             raw_bytes = INDEX_PATH.read_bytes()
             if raw_bytes:
-                index = faiss.deserialize_index(np.frombuffer(raw_bytes, dtype=np.uint8))
+                index = deserialize_index(raw_bytes)
                 with open(METADATA_PATH, "r", encoding="utf-8") as f:
                     metadata = json.load(f)
         except Exception:
@@ -233,8 +233,8 @@ def _save_all_indices(index, metadata: List[Dict], bm25: BM25Index) -> None:
     """Serializes FAISS, BM25, and metadata."""
     config.FAISS_INDEX_DIR.mkdir(parents=True, exist_ok=True)
     if index is not None:
-        raw_array = faiss.serialize_index(index)
-        INDEX_PATH.write_bytes(raw_array.tobytes())
+        raw_array = serialize_index(index)
+        INDEX_PATH.write_bytes(raw_array.tobytes() if hasattr(raw_array, "tobytes") else bytes(raw_array))
     with open(METADATA_PATH, "w", encoding="utf-8") as f:
         json.dump(metadata, f, indent=2)
     bm25.save(BM25_PATH)
@@ -308,7 +308,7 @@ def ingest_document(file_path: Union[str, Path]) -> Dict:
         index, metadata, _ = _load_all_indices()
 
         if index is None:
-            index = faiss.IndexFlatL2(dim)
+            index = IndexFlatL2(dim)
         elif index.d != dim:
             raise ValueError(
                 f"Embedding dimension mismatch: existing index is {index.d}-dim, "
@@ -380,7 +380,7 @@ def delete_document(filename: str) -> Dict:
                 # FAST: Reconstruct vectors directly from the existing FAISS index in memory (<1ms)
                 remaining_vectors = np.array([index.reconstruct(int(i)) for i in remaining_indices], dtype="float32")
                 dim = index.d
-                new_index = faiss.IndexFlatL2(dim)
+                new_index = IndexFlatL2(dim)
                 new_index.add(remaining_vectors)
             else:
                 # Fallback only if index was missing or desynchronized
@@ -391,7 +391,7 @@ def delete_document(filename: str) -> Dict:
                     vectors = [ollama.embed(embed_model, chunk) for chunk in child_texts]
 
                 dim = len(vectors[0])
-                new_index = faiss.IndexFlatL2(dim)
+                new_index = IndexFlatL2(dim)
                 vectors_np = np.array(vectors, dtype="float32")
                 new_index.add(vectors_np)
 
