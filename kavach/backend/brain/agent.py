@@ -62,35 +62,85 @@ MAX_HISTORY_TURNS = 12
 MAX_HISTORY_CHARS_PER_MSG = 1200
 
 
+def _get_vault_document_names() -> List[str]:
+    """Dynamically reads the list of all currently indexed documents in the vault."""
+    from backend.vault.ingest import METADATA_PATH
+    if not METADATA_PATH.exists():
+        return []
+    try:
+        with open(METADATA_PATH, "r", encoding="utf-8") as f:
+            meta = json.load(f)
+        return sorted({entry.get("source_filename") for entry in meta if entry.get("source_filename")})
+    except Exception:
+        return []
+
+
+def _matches_vault_document(task_lower: str, doc_names: Optional[List[str]] = None) -> bool:
+    """Dynamically checks if the query references any active document in the Knowledge Vault."""
+    docs = doc_names if doc_names is not None else _get_vault_document_names()
+    if not docs:
+        return False
+
+    task_words = set(re.findall(r"[a-z0-9]+", task_lower))
+
+    for doc in docs:
+        doc_lower = doc.lower()
+        stem = Path(doc).stem.lower()
+
+        # 1. Direct substring match of full filename or stem
+        if (len(doc_lower) > 3 and doc_lower in task_lower) or (len(stem) > 3 and stem in task_lower):
+            return True
+
+        # 2. Normalized stem (e.g. 'kavach_context' -> 'kavach context')
+        norm_stem = re.sub(r"[_\-.\(\)\[\]0-9]+", " ", stem).strip()
+        if len(norm_stem) > 3 and norm_stem in task_lower:
+            return True
+
+        # 3. Token match: check if significant stem words appear in the task
+        stem_tokens = [w for w in re.findall(r"[a-z0-9]+", stem) if len(w) >= 3 and not w.isdigit()]
+        if stem_tokens:
+            matched_tokens = [w for w in stem_tokens if w in task_words or w in task_lower]
+            if len(stem_tokens) == 1 and len(matched_tokens) == 1:
+                return True
+            elif len(stem_tokens) > 1 and len(matched_tokens) >= max(2, len(stem_tokens) // 2):
+                return True
+
+    return False
+
+
 VALID_TOOLS = {"llm", "search", "calc", "vision", "document", "code", "ocr"}
 
 MASTER_PLAN_PROMPT_TEMPLATE = """You are the master task planner for KAVACH, an autonomous on-premises industrial operations assistant.
 Break down the user's request into the minimum necessary number of ordered sub-tasks (1 to 8 steps).
 
+{vault_section}
 CRITICAL RULES:
 1. MINIMALITY: If the request is a single action, simple question, search, code request, or calculation, output EXACTLY 1 step.
-2. COMPOUND & MULTIMODAL REQUESTS: If the user's request combines multiple distinct capabilities:
+2. DYNAMIC KNOWLEDGE VAULT RETRIEVAL:
+   - Check the "Available Knowledge Vault Documents" list above.
+   - If the user's request asks about, references, or requires information from ANY of the available documents in the Knowledge Vault (or asks about specifications, procedures, policies, guidelines, architecture, or domain context that might be contained in them), you MUST plan a 'search' step to retrieve the source excerpts from the Knowledge Vault!
+3. COMPOUND & MULTIMODAL REQUESTS: If the user's request combines multiple distinct capabilities:
    - Multimodal Compound: If an image is attached or referenced AND the user asks to write code, do a calculation, write a document, or generate creative writing/poems, you MUST separate them into multiple distinct steps!
      Step 1 'vision' to inspect and describe the image.
      Step 2 'llm' to write the poem or analysis based on the image description.
      Step 3 'code' to generate and execute the requested Python script in the Docker sandbox.
      CRITICAL: NEVER put coding, calculations, poems, or document drafting into a 'vision' step! The 'vision' tool CAN ONLY inspect and describe images.
    - Code + Document: Step 1 'code' to run script in sandbox, Step 2 'document' to create Word report.
-   - Search + Calc / Code: Step 1 'search', Step 2 'calc' or 'code'.
-3. ATOMIC TOOL STEPS: Never split the execution of a single capability into multiple steps (e.g. do NOT create separate 'write code', 'run code', 'verify code' steps — a coding task is ONE step with tool 'code').
-4. Each step must be a concrete, actionable sub-task with:
+   - Search + Calc / Code / Document: Step 1 'search', Step 2 'calc' or 'code' or 'document'.
+4. ATOMIC TOOL STEPS: Never split the execution of a single capability into multiple steps (e.g. do NOT create separate 'write code', 'run code', 'verify code' steps — a coding task is ONE step with tool 'code').
+5. Each step must be a concrete, actionable sub-task with:
    - "step_num": integer (1, 2, 3, ...)
    - "tool": one of ["search", "calc", "code", "document", "ocr", "vision", "llm"]
    - "input": clear specific instruction for that step
 
 Capabilities:
-- "search": Look up SOPs, incident procedures, equipment specs, or thresholds in the Knowledge Vault.
+- "search": Look up information, SOPs, incident procedures, equipment specs, architecture, or uploaded documents in the Knowledge Vault.
 - "calc": Numerical arithmetic, formulas, remaining life, corrosion rates, or unit conversions.
 - "code": Generate and run Python/JS/C scripts in the secure Docker container sandbox.
 - "document": Draft formal corporate Word (.docx) documents, reports, or SOPs.
 - "ocr": Read and extract text from scanned images or inspection sheets.
 - "vision": Inspect diagrams, schematics, photos, or gauges.
-- "llm": Direct answering, general explanation, or conversational reasoning.
+- "llm": Direct answering, general explanation, or conversational reasoning for generic topics not in the vault.
 
 Examples:
 Request: "Search the SOPs for who must be notified during a Severity 1 incident."
@@ -403,7 +453,13 @@ def _parse_master_plan(
         elif has_doc_intent:
             fallback_tool = "document"
             parsed_steps = [{"step_num": 1, "tool": fallback_tool, "input": original_task, "status": "pending"}]
-        elif any(w in task_lower for w in ["search", "sop", "procedure", "guideline", "standard operating procedure"]):
+        # Dynamic check: Does the request mention any active document indexed in the Knowledge Vault?
+        if _matches_vault_document(task_lower) or any(w in task_lower for w in [
+            "search", "sop", "procedure", "guideline", "standard operating procedure",
+            "knowledge vault", "uploaded document", "uploaded file", "context document",
+            "policy document", "manual", "handbook", "datasheet", "specification",
+            "specs", "thresholds", "guidelines",
+        ]):
             fallback_tool = "search"
             parsed_steps = [{"step_num": 1, "tool": fallback_tool, "input": original_task, "status": "pending"}]
         else:
@@ -463,7 +519,15 @@ def master_plan_node(state: AgentState) -> dict:
     if state.get("attachment_type"):
         attachment_info = f"Attachment present (type: {state['attachment_type']})\n"
 
+    vault_docs = _get_vault_document_names()
+    if vault_docs:
+        docs_list_str = "\n".join(f"- {d}" for d in vault_docs)
+        vault_section = f"Available Knowledge Vault Documents (Live Index):\n{docs_list_str}\n"
+    else:
+        vault_section = "Available Knowledge Vault Documents: (None currently indexed in vault)\n"
+
     prompt = MASTER_PLAN_PROMPT_TEMPLATE.format(
+        vault_section=vault_section,
         history_section=history_section,
         task=state["original_task"],
         attachment_info=attachment_info,

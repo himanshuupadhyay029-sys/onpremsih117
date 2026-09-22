@@ -35,9 +35,8 @@ from backend.db.session import get_db, SessionLocal
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from backend.guard.approve import get_approval, resolve_approval
-from backend.tools.writer import render_docx
 from backend.terminal_logger import log_gateway, _truncate
-from backend.vault.ingest import METADATA_PATH, SUPPORTED_EXTENSIONS, ingest_document
+from backend.vault.ingest import METADATA_PATH, SUPPORTED_EXTENSIONS, ingest_document, delete_document
 from backend.shield.firewall import (
     check_firewall_status,
     disable_firewall_lockdown,
@@ -83,12 +82,15 @@ if VANILLA_FRONTEND_DIR.exists():
 
 
 @app.on_event("startup")
-def _start_shield_monitor() -> None:
+def _on_startup() -> None:
     start_monitor(interval_seconds=1.0)
+    import threading
+    from backend.vault.rerank import preload_reranker
+    threading.Thread(target=preload_reranker, daemon=True).start()
 
 
 @app.on_event("shutdown")
-def _stop_shield_monitor() -> None:
+def _on_shutdown() -> None:
     stop_monitor()
 
 
@@ -865,6 +867,21 @@ def knowledge_upload(file: UploadFile = File(...), ingest: bool = Form(True)):
             status_code=500,
             detail=f"Failed to ingest document into knowledge vault: {exc}",
         )
+
+
+@app.delete("/knowledge/{filename:path}")
+def knowledge_delete(filename: str):
+    """Deletes all chunks, embeddings, and BM25 index entries for a document and removes the file from disk."""
+    safe_name = Path(filename).name
+    try:
+        res = delete_document(safe_name)
+        if not res.get("success"):
+            raise HTTPException(status_code=404, detail=res.get("message", "Document not found in vault."))
+        return res
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to delete document: {exc}")
 
 
 @app.get("/shield/status")
