@@ -71,7 +71,8 @@ _KEYWORDS = {
         "code", "python", "function", "script", "program", "debug", "bug",
         "class ", "def ", "algorithm", "javascript", "typescript", "java ",
         "c++", "sql", "regex", "compile", "syntax", "refactor", "programming",
-        "write a function", "implement a",
+        "write a function", "implement a", "write a python", "python script",
+        "python program", "write code", "coding", "run a script", "write a script",
     ],
     "calc": [
         "calculate", "calc ", "calculation", "compute", "sum of", "average", "mean of", "median",

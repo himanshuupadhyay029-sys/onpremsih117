@@ -11,11 +11,21 @@ from pathlib import Path
 import re
 from typing import Any, Dict, List, Optional, Union
 
-from pptx import Presentation
-from pptx.dml.color import RGBColor
-from pptx.enum.shapes import MSO_SHAPE
-from pptx.enum.text import PP_ALIGN
-from pptx.util import Inches, Pt
+try:
+    from pptx import Presentation
+    from pptx.dml.color import RGBColor
+    from pptx.enum.shapes import MSO_SHAPE
+    from pptx.enum.text import PP_ALIGN
+    from pptx.util import Inches, Pt
+    HAS_PPTX = True
+except ImportError:
+    HAS_PPTX = False
+    Presentation = None
+    RGBColor = None
+    MSO_SHAPE = None
+    PP_ALIGN = None
+    Inches = None
+    Pt = None
 
 from backend import config
 from backend.audit.logbook import log_event

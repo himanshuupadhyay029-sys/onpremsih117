@@ -133,7 +133,7 @@ export default function App() {
           onToggleSidebar={toggleSidebar}
         />
 
-        <div className="screens">
+        <div className={`screens ${activeScreen === 'task' ? 'screens-chat' : ''}`}>
           {activeScreen === 'task' && (
             <NewTaskScreen
               setIsThinking={setIsThinking}

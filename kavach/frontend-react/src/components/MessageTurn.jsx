@@ -33,6 +33,8 @@ export default function MessageTurn({
   const [editSections, setEditSections] = useState('');
   const [clarifyInput, setClarifyInput] = useState('');
   const [showReasoning, setShowReasoning] = useState(false);
+  const [showThoughts, setShowThoughts] = useState(false);
+  const [copiedAnswer, setCopiedAnswer] = useState(false);
 
   // Extract turn properties whether from live streaming or persisted DB record
   const isUser = turn.role === 'user';
@@ -184,33 +186,59 @@ export default function MessageTurn({
     setEditingApproval(false);
   };
 
+  const handleCopyAnswer = () => {
+    if (!cleanAnswer) return;
+    navigator.clipboard.writeText(cleanAnswer).then(() => {
+      setCopiedAnswer(true);
+      setTimeout(() => setCopiedAnswer(false), 2000);
+    }).catch(() => {});
+  };
+
   // -------------------------------------------------------------------------
   // USER TURN (Right-aligned bubble matching Claude)
   // -------------------------------------------------------------------------
   if (isUser) {
-    const attachedFileName =
-      turn.attachedFile?.name ||
-      meta.filename ||
-      meta.attachment_name ||
-      (turn.content && turn.content.includes("Attached file:")
-        ? turn.content.split("Attached file:")[1].trim().split("\n")[0]
-        : null);
+    let userAttachments = [];
+    if (Array.isArray(turn.attachments) && turn.attachments.length > 0) {
+      userAttachments = turn.attachments;
+    } else if (Array.isArray(meta.attachments) && meta.attachments.length > 0) {
+      userAttachments = meta.attachments;
+    } else if (turn.content && turn.content.includes("Attached file:")) {
+      const lines = turn.content.split("\n");
+      const matched = lines
+        .filter((l) => l.trim().startsWith("Attached file:"))
+        .map((l) => {
+          const rawPath = l.replace("Attached file:", "").trim();
+          const name = rawPath.split(/[\\/]/).pop();
+          return { name, path: rawPath };
+        });
+      if (matched.length > 0) userAttachments = matched;
+    } else if (turn.attachedFile?.name || meta.filename || meta.attachment_name) {
+      userAttachments = [{ name: turn.attachedFile?.name || meta.filename || meta.attachment_name }];
+    }
 
-    const userText = turn.content && turn.content.includes("\n\nAttached file:")
-      ? turn.content.split("\n\nAttached file:")[0]
-      : turn.content;
+    let userText = turn.content || '';
+    if (userText.includes("\n\nAttached file:")) {
+      userText = userText.split("\n\nAttached file:")[0];
+    } else if (userText.includes("Attached file:")) {
+      userText = userText.replace(/Attached file:[^\n]+(\n|$)/g, '').trim();
+    }
     const vaultFiles = turn.vault_files || meta.vault_files || [];
 
     return (
       <div className="chat-msg-row chat-msg-row-user" id={`turn-${turn.id}`}>
         <div className="chat-msg chat-msg-user">
-          {/* Standard Attached File */}
-          {attachedFileName && (
-            <div className="chat-user-attachment">
-              <svg className="icon icon-sm" viewBox="0 0 24 24">
-                <path d="M14 4l-7.5 7.5a3 3 0 004.2 4.2L18 8.5" />
-              </svg>
-              <span>{attachedFileName}</span>
+          {/* Multi-File Attached Files Tray */}
+          {userAttachments.length > 0 && (
+            <div className="chat-user-attachments-tray">
+              {userAttachments.map((att, idx) => (
+                <div className="chat-user-attachment-badge" key={idx} title={att.name || att.path}>
+                  <svg className="icon icon-sm" viewBox="0 0 24 24">
+                    <path d="M14 4l-7.5 7.5a3 3 0 004.2 4.2L18 8.5" />
+                  </svg>
+                  <span>{att.name || (att.path ? att.path.split(/[\\/]/).pop() : 'Attached File')}</span>
+                </div>
+              ))}
             </div>
           )}
 
@@ -253,63 +281,106 @@ export default function MessageTurn({
             {modelMeta && <span className="run-meta-pill">{modelMeta}</span>}
           </div>
 
+          {/* Collapsible Thought Process (Steps & Reasoning) */}
+          {(steps.length > 0 || ((turn.trace || meta.trace || []).length > 0) || isStreaming) && (
+            <div className="thought-accordion">
+              <button
+                type="button"
+                className="thought-toggle-btn"
+                onClick={() => setShowThoughts(!showThoughts)}
+                title="Toggle thought process and execution steps"
+              >
+                <svg className="icon-sparkle" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M12 2L9.5 8.5L3 11L9.5 13.5L12 20L14.5 13.5L21 11L14.5 8.5L12 2Z" />
+                </svg>
+                <span>
+                  {isStreaming
+                    ? (turn.statusText || 'Thinking…')
+                    : `Thought process (${steps.length > 0 ? `${steps.length} step${steps.length === 1 ? '' : 's'}` : 'reasoning'})`}
+                </span>
+                <svg
+                  className="chevron"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  style={{ transform: (isStreaming || showThoughts || (!cleanAnswer && !approval && deliverables.length === 0)) ? 'rotate(180deg)' : 'rotate(0deg)' }}
+                >
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
+              </button>
 
-        {/* Live Thinking Status Pill */}
-        {isStreaming && (
-          <div className="thinking">
-            <span className="pulse" />
-            <span>{turn.statusText || 'Planning steps…'}</span>
-          </div>
-        )}
-
-        {/* Execution Steps */}
-        {steps.length > 0 && (
-          <div className="steps">
-            {steps.map((step, idx) => {
-              const isRunning =
-                isStreaming &&
-                step.status === 'pending' &&
-                (idx === 0 || steps[idx - 1].status === 'done');
-              const stateClass = isRunning
-                ? 'is-running'
-                : step.status === 'done'
-                ? 'is-done'
-                : step.status === 'failed'
-                ? 'is-failed'
-                : 'is-pending';
-
-              return (
-                <div key={idx} className={`step ${stateClass}`}>
-                  <span className="step-marker" />
-                  <div className="step-body">
-                    <div className="step-tool-row">
-                      <div className="step-tool">
-                        {TOOL_LABELS[step.tool] || step.tool}
-                      </div>
-                      {(step.model || step.model_role) && (
-                        <span
-                          className="step-model-tag"
-                          title={`Executed with model: ${step.model || step.model_role}`}
-                        >
-                          <svg className="icon icon-xs" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth="2"
-                              d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"
-                            />
-                          </svg>
-                          <span>{step.model || step.model_role}</span>
-                        </span>
-                      )}
+              {(isStreaming || showThoughts || (!cleanAnswer && !approval && deliverables.length === 0)) && (
+                <div className="thought-content-box">
+                  {isStreaming && (
+                    <div className="thinking" style={{ marginBottom: '6px' }}>
+                      <span className="pulse" />
+                      <span>{turn.statusText || 'Planning steps…'}</span>
                     </div>
-                    <div className="step-input">{step.input}</div>
-                  </div>
+                  )}
+
+                  {steps.length > 0 && (
+                    <div className="steps">
+                      {steps.map((step, idx) => {
+                        const isRunning =
+                          isStreaming &&
+                          step.status === 'pending' &&
+                          (idx === 0 || steps[idx - 1].status === 'done');
+                        const stateClass = isRunning
+                          ? 'is-running'
+                          : step.status === 'done'
+                          ? 'is-done'
+                          : step.status === 'failed'
+                          ? 'is-failed'
+                          : 'is-pending';
+
+                        return (
+                          <div key={idx} className={`step ${stateClass}`}>
+                            <span className="step-marker" />
+                            <div className="step-body">
+                              <div className="step-tool-row">
+                                <div className="step-tool">
+                                  {TOOL_LABELS[step.tool] || step.tool}
+                                </div>
+                                {(step.model || step.model_role) && (
+                                  <span
+                                    className="step-model-tag"
+                                    title={`Executed with model: ${step.model || step.model_role}`}
+                                  >
+                                    <svg className="icon icon-xs" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                      <path
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        strokeWidth="2"
+                                        d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"
+                                      />
+                                    </svg>
+                                    <span>{step.model || step.model_role}</span>
+                                  </span>
+                                )}
+                              </div>
+                              <div className="step-input">{step.input}</div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {((turn.trace || meta.trace || []).length > 0) && (
+                    <div style={{ marginTop: '8px', fontSize: '0.8rem', fontFamily: 'monospace' }}>
+                      {(turn.trace || meta.trace || []).map((tr, tIdx) => (
+                        <div key={tIdx} style={{ margin: '4px 0', color: tr.role === 'thought' ? '#38bdf8' : (tr.role === 'action' ? '#c084fc' : 'var(--text-secondary)') }}>
+                          <strong style={{ textTransform: 'uppercase', marginRight: '6px' }}>[{tr.role}]:</strong>
+                          <span>{tr.content}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
-              );
-            })}
-          </div>
-        )}
+              )}
+            </div>
+          )}
 
         {/* Human Approval Gate Card */}
         {approval && (
@@ -487,60 +558,53 @@ export default function MessageTurn({
           </div>
         )}
 
-        {/* Autonomous Reasoning & Self-Correction Trail */}
-        {((turn.trace || meta.trace || []).length > 0) && (
-          <div className="card reasoning-card" style={{ marginBottom: '12px', background: 'rgba(255,255,255,0.02)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.07)' }}>
-            <button
-              onClick={() => setShowReasoning(!showReasoning)}
-              style={{
-                width: '100%',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                background: 'transparent',
-                border: 'none',
-                padding: '10px 14px',
-                color: 'var(--text-secondary, #94a3b8)',
-                cursor: 'pointer',
-                fontSize: '0.85rem',
-              }}
-            >
-              <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <svg className="icon icon-xs" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                  <path strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
-                </svg>
-                Agent Reasoning & Self-Correction Trail ({(turn.trace || meta.trace || []).length} steps)
-              </span>
-              <span>{showReasoning ? '▲ Hide' : '▼ View'}</span>
-            </button>
-            {showReasoning && (
-              <div style={{ padding: '6px 14px 12px 14px', borderTop: '1px solid rgba(255,255,255,0.06)', fontSize: '0.8rem', fontFamily: 'monospace' }}>
-                {(turn.trace || meta.trace || []).map((tr, tIdx) => (
-                  <div key={tIdx} style={{ margin: '6px 0', color: tr.role === 'thought' ? '#38bdf8' : (tr.role === 'action' ? '#c084fc' : '#94a3b8') }}>
-                    <strong style={{ textTransform: 'uppercase', marginRight: '6px' }}>[{tr.role}]:</strong>
-                    <span>{tr.content}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Extracted Key Facts */}
-        {(Object.keys(turn.key_facts || meta.key_facts || {}).length > 0) && (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '12px' }}>
-            {Object.entries(turn.key_facts || meta.key_facts || {}).map(([k, v]) => (
-              <span key={k} style={{ fontSize: '0.75rem', padding: '3px 8px', borderRadius: '4px', background: 'rgba(56, 189, 248, 0.08)', color: '#38bdf8', border: '1px solid rgba(56, 189, 248, 0.25)' }}>
-                <strong>{k}:</strong> {typeof v === 'object' ? JSON.stringify(v) : String(v)}
-              </span>
-            ))}
-          </div>
-        )}
-
         {/* Standard Text Answer */}
         {cleanAnswer && (
-          <div className="card answer-card">
-            <div className="answer">{cleanAnswer}</div>
+          <div className="answer">
+            {cleanAnswer}
+          </div>
+        )}
+
+        {/* Action Bar (Copy / Regenerate) */}
+        {!isStreaming && cleanAnswer && (
+          <div className="chat-msg-actions">
+            <button
+              type="button"
+              className={`chat-action-btn ${copiedAnswer ? 'is-copied' : ''}`}
+              onClick={handleCopyAnswer}
+              title={copiedAnswer ? 'Copied to clipboard' : 'Copy response'}
+            >
+              {copiedAnswer ? (
+                <>
+                  <svg className="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg>
+                  <span>Copied</span>
+                </>
+              ) : (
+                <>
+                  <svg className="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                  </svg>
+                  <span>Copy</span>
+                </>
+              )}
+            </button>
+            {onRetry && (
+              <button
+                type="button"
+                className="chat-action-btn"
+                onClick={() => onRetry(turn.retryPrompt || turn.content)}
+                title="Regenerate response"
+              >
+                <svg className="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <polyline points="1 4 1 10 7 10" />
+                  <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+                </svg>
+                <span>Regenerate</span>
+              </button>
+            )}
           </div>
         )}
 

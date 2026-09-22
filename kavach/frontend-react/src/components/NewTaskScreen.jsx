@@ -2,11 +2,10 @@ import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import MessageTurn from './MessageTurn';
 
 const GREETINGS = [
-  "Where should we begin?",
-  "Ready when you are.",
-  "What's the task at hand?",
-  "SOPs, a calculation, or a report?",
-  "How can I help, Operator?",
+  "What can I help with today?",
+  "What would you like to solve?",
+  "How can I assist you today?",
+  "Ready for your next task.",
 ];
 
 const SUGGESTION_CHIPS = [
@@ -91,7 +90,7 @@ export default function NewTaskScreen({
   onChatsUpdated,
 }) {
   const [taskInput, setTaskInput] = useState('');
-  const [attachedFile, setAttachedFile] = useState(null);
+  const [attachedFiles, setAttachedFiles] = useState([]);
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
   const [taggedVaultFiles, setTaggedVaultFiles] = useState([]);
   const [vaultDocs, setVaultDocs] = useState([]);
@@ -99,6 +98,7 @@ export default function NewTaskScreen({
   const [showMentionPopover, setShowMentionPopover] = useState(false);
   const [mentionFilter, setMentionFilter] = useState('');
   const [mentionSelectedIndex, setMentionSelectedIndex] = useState(0);
+  const [isDragOver, setIsDragOver] = useState(false);
   const [greeting] = useState(() => GREETINGS[Math.floor(Math.random() * GREETINGS.length)]);
 
   // Unified conversation turns
@@ -217,7 +217,7 @@ export default function NewTaskScreen({
     // Reset turns and input state on session change
     setMessages([]);
     setTaskInput('');
-    setAttachedFile(null);
+    setAttachedFiles([]);
     setTaggedVaultFiles([]);
     setApprovalOutcome({});
 
@@ -246,7 +246,7 @@ export default function NewTaskScreen({
   // Auto-scroll to bottom of thread
   useEffect(() => {
     if (chatBottomRef.current) {
-      chatBottomRef.current.scrollIntoView({ behavior: 'smooth' });
+      chatBottomRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
     }
   }, [messages, running]);
 
@@ -322,12 +322,23 @@ export default function NewTaskScreen({
     }
   };
 
-  const handleFileChange = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    setUploadingAttachment(true);
-    setAttachedFile({ name: `Uploading ${file.name}…`, path: null });
+  const formatFileSize = (bytes) => {
+    if (!bytes && bytes !== 0) return '';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
 
+  const getFileTypeCategory = (filename) => {
+    const ext = (filename || '').split('.').pop()?.toLowerCase();
+    if (ext === 'pdf') return 'pdf';
+    if (['png', 'jpg', 'jpeg', 'webp', 'bmp', 'tiff', 'gif'].includes(ext)) return 'img';
+    if (['doc', 'docx', 'txt', 'md'].includes(ext)) return 'doc';
+    if (['xls', 'xlsx', 'csv'].includes(ext)) return 'sheet';
+    return 'default';
+  };
+
+  const uploadSingleFile = async (tempId, file) => {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('ingest', 'false');
@@ -354,13 +365,151 @@ export default function NewTaskScreen({
       if (!res.ok) {
         throw new Error(data.detail || data.error || res.statusText || `Server error (${res.status})`);
       }
-      setAttachedFile({ name: data.filename || file.name, path: data.file_path });
+
+      setAttachedFiles((prev) =>
+        prev.map((f) =>
+          f.id === tempId
+            ? {
+                ...f,
+                name: data.filename || file.name,
+                path: data.file_path,
+                status: 'ready',
+              }
+            : f
+        )
+      );
     } catch (err) {
-      setAttachedFile({ name: `Upload failed: ${err.message}`, path: null });
-    } finally {
-      setUploadingAttachment(false);
-      e.target.value = '';
+      setAttachedFiles((prev) =>
+        prev.map((f) =>
+          f.id === tempId
+            ? {
+                ...f,
+                status: 'error',
+                error: err.message,
+              }
+            : f
+        )
+      );
     }
+  };
+
+  const processFiles = (fileList) => {
+    const files = Array.from(fileList || []);
+    if (!files.length) return;
+
+    setUploadingAttachment(true);
+    const newItems = files.map((file) => {
+      const tempId = `file-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      const isImg = ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'tiff', 'gif'].includes(
+        (file.name || '').split('.').pop()?.toLowerCase()
+      );
+      return {
+        id: tempId,
+        fileObj: file,
+        name: file.name,
+        size: file.size,
+        path: null,
+        status: 'uploading',
+        category: getFileTypeCategory(file.name),
+        previewUrl: isImg ? URL.createObjectURL(file) : null,
+      };
+    });
+
+    // Append to existing attachments (supports both sequential and bulk additions)
+    setAttachedFiles((prev) => [...prev, ...newItems]);
+
+    // Kick off uploads concurrently
+    Promise.allSettled(newItems.map((item) => uploadSingleFile(item.id, item.fileObj))).finally(() => {
+      setUploadingAttachment(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    });
+  };
+
+  const handleFileChange = (e) => {
+    processFiles(e.target.files);
+  };
+
+  const removeAttachment = (id) => {
+    setAttachedFiles((prev) => {
+      const target = prev.find((f) => f.id === id);
+      if (target?.previewUrl) {
+        URL.revokeObjectURL(target.previewUrl);
+      }
+      return prev.filter((f) => f.id !== id);
+    });
+  };
+
+  const clearAllAttachments = () => {
+    attachedFiles.forEach((f) => {
+      if (f.previewUrl) URL.revokeObjectURL(f.previewUrl);
+    });
+    setAttachedFiles([]);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const handleDragOver = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!running) setIsDragOver(true);
+  };
+
+  const handleDragLeave = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(false);
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(false);
+    if (running) return;
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      processFiles(e.dataTransfer.files);
+    }
+  };
+
+  const renderAttachmentIcon = (category, previewUrl) => {
+    if (category === 'img' && previewUrl) {
+      return <img src={previewUrl} alt="preview" className="attachment-chip-img" />;
+    }
+    if (category === 'pdf') {
+      return (
+        <svg className="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          <polyline points="14 2 14 8 20 8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          <line x1="16" y1="13" x2="8" y2="13" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          <line x1="16" y1="17" x2="8" y2="17" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          <polyline points="10 9 9 9 8 9" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      );
+    }
+    if (category === 'sheet') {
+      return (
+        <svg className="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+          <rect x="3" y="3" width="18" height="18" rx="2" strokeWidth="2" />
+          <line x1="3" y1="9" x2="21" y2="9" strokeWidth="2" />
+          <line x1="3" y1="15" x2="21" y2="15" strokeWidth="2" />
+          <line x1="9" y1="3" x2="9" y2="21" strokeWidth="2" />
+          <line x1="15" y1="3" x2="15" y2="21" strokeWidth="2" />
+        </svg>
+      );
+    }
+    if (category === 'img') {
+      return (
+        <svg className="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+          <rect x="3" y="3" width="18" height="18" rx="2" strokeWidth="2" />
+          <circle cx="8.5" cy="8.5" r="1.5" strokeWidth="2" />
+          <polyline points="21 15 16 10 5 21" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      );
+    }
+    return (
+      <svg className="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        <polyline points="14 2 14 8 20 8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    );
   };
 
   // Live audit event parser for in-flight assistant turn
@@ -450,7 +599,19 @@ export default function NewTaskScreen({
     if (!task || running) return;
 
     const taskId = crypto.randomUUID();
-    const fullTask = attachedFile?.path ? `${task}\n\nAttached file: ${attachedFile.path}` : task;
+    const readyAttachments = attachedFiles.filter((f) => f.status === 'ready' && f.path);
+    let fullTask = task;
+    if (readyAttachments.length === 1) {
+      fullTask = `${task}\n\nAttached file: ${readyAttachments[0].path}`;
+    } else if (readyAttachments.length > 1) {
+      const filesFormatted = readyAttachments.map((f) => `Attached file: ${f.path}`).join('\n');
+      fullTask = `${task}\n\n${filesFormatted}`;
+    }
+
+    const hasImageAttachment = readyAttachments.some(
+      (f) => f.category === 'img' || (f.path && /\.(png|jpg|jpeg|webp|bmp|tiff)$/i.test(f.path))
+    );
+    const attachmentType = readyAttachments.length > 0 ? (hasImageAttachment ? 'image' : 'file') : null;
 
     const tempUserId = `temp-user-${Date.now()}`;
     const tempAsstId = `temp-asst-${Date.now()}`;
@@ -459,9 +620,16 @@ export default function NewTaskScreen({
       id: tempUserId,
       role: 'user',
       content: task,
+      attachments: readyAttachments.map((f) => ({
+        name: f.name,
+        path: f.path,
+        size: f.size,
+        category: f.category,
+      })),
       created_at: new Date().toISOString(),
       meta: {
-        attachment_type: attachedFile ? 'file' : null,
+        attachment_type: attachmentType,
+        attachments: readyAttachments.map((f) => ({ name: f.name, path: f.path, size: f.size, category: f.category })),
         vault_files: taggedVaultFiles.length > 0 ? [...taggedVaultFiles] : null,
         task_id: taskId,
       },
@@ -508,7 +676,7 @@ export default function NewTaskScreen({
       );
     }, 1000);
 
-    let streamUrl = `/run/stream?task=${encodeURIComponent(fullTask)}&task_id=${encodeURIComponent(taskId)}${activeChatId ? `&chat_id=${encodeURIComponent(activeChatId)}` : ''}${attachedFile ? `&attachment_type=file` : ''}`;
+    let streamUrl = `/run/stream?task=${encodeURIComponent(fullTask)}&task_id=${encodeURIComponent(taskId)}${activeChatId ? `&chat_id=${encodeURIComponent(activeChatId)}` : ''}${attachmentType ? `&attachment_type=${encodeURIComponent(attachmentType)}` : ''}`;
     if (taggedVaultFiles.length > 0) {
       taggedVaultFiles.forEach((vf) => {
         streamUrl += `&vault_files=${encodeURIComponent(vf)}`;
@@ -706,7 +874,7 @@ export default function NewTaskScreen({
       } finally {
         setRunning(false);
         setIsThinking(false);
-        setAttachedFile(null);
+        setAttachedFiles([]);
       }
     });
 
@@ -937,7 +1105,13 @@ export default function NewTaskScreen({
 
       {/* Pinned Bottom Input Area (Never moves, pinned to bottom of viewport) */}
       <div className="chat-composer-fixed" id="chat-composer-fixed">
-        <div className="composer" style={{ position: 'relative' }}>
+        <div
+          className={`composer ${isDragOver ? 'is-drag-over' : ''}`}
+          style={{ position: 'relative' }}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+        >
           {/* Mention Popover Floating Dropdown */}
           {showMentionPopover && (
             <div className="mention-popover" ref={popoverRef} id="mention-popover">
@@ -988,8 +1162,8 @@ export default function NewTaskScreen({
             </div>
           )}
 
-          {/* Attached Knowledge Vault Chips & File Attachments */}
-          {(taggedVaultFiles.length > 0 || attachedFile) && (
+          {/* Attached Knowledge Vault Chips */}
+          {taggedVaultFiles.length > 0 && (
             <div className="composer-attachments-row" id="composer-attachments-row">
               {taggedVaultFiles.map((filename) => (
                 <div key={filename} className="vault-chip" title="Knowledge Vault Document Reference">
@@ -1010,24 +1184,6 @@ export default function NewTaskScreen({
                   </button>
                 </div>
               ))}
-
-              {attachedFile && (
-                <div className="attachment" id="attachment">
-                  <svg className="icon icon-sm" viewBox="0 0 24 24">
-                    <path d="M14 4l-7.5 7.5a3 3 0 004.2 4.2L18 8.5" />
-                  </svg>
-                  <span id="attachment-name">{attachedFile.name}</span>
-                  <button
-                    id="attachment-clear"
-                    onClick={() => setAttachedFile(null)}
-                    title="Remove attachment"
-                  >
-                    <svg className="icon icon-sm" viewBox="0 0 24 24">
-                      <path d="M6 6l12 12M18 6L6 18" />
-                    </svg>
-                  </button>
-                </div>
-              )}
             </div>
           )}
 
@@ -1035,12 +1191,59 @@ export default function NewTaskScreen({
             ref={textareaRef}
             id="task-input"
             rows={1}
-            placeholder="Ask about an SOP, reference @file, run a calculation, or draft a report…"
+            placeholder="Message Kavach or reference @document…"
             value={taskInput}
             onChange={handleInputChange}
             onKeyDown={handleKeyDown}
             disabled={running}
           />
+
+          {attachedFiles.length > 0 && (
+            <div className="attachment-tray" id="attachment-tray">
+              {attachedFiles.map((file) => (
+                <div
+                  key={file.id}
+                  className={`attachment-chip ${file.status === 'uploading' ? 'is-uploading' : ''} ${file.status === 'error' ? 'is-error' : ''}`}
+                  title={file.error ? `Error: ${file.error}` : file.name}
+                >
+                  <div className={`attachment-chip-preview preview-${file.category}`}>
+                    {renderAttachmentIcon(file.category, file.previewUrl)}
+                  </div>
+                  <div className="attachment-chip-info">
+                    <span className="attachment-chip-name">{file.name}</span>
+                    <span className="attachment-chip-meta">
+                      {file.status === 'uploading'
+                        ? 'Uploading…'
+                        : file.status === 'error'
+                        ? 'Failed'
+                        : formatFileSize(file.size)}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    className="attachment-chip-remove"
+                    onClick={() => removeAttachment(file.id)}
+                    title="Remove attachment"
+                  >
+                    <svg className="icon icon-sm" viewBox="0 0 24 24">
+                      <path d="M6 6l12 12M18 6L6 18" />
+                    </svg>
+                  </button>
+                </div>
+              ))}
+
+              {attachedFiles.length > 1 && (
+                <button
+                  type="button"
+                  className="attachment-clear-all"
+                  onClick={clearAllAttachments}
+                  title="Clear all attachments"
+                >
+                  Clear all
+                </button>
+              )}
+            </div>
+          )}
 
           <div className="composer-bar">
             <button
@@ -1048,7 +1251,7 @@ export default function NewTaskScreen({
               id="attach-btn"
               onClick={() => fileInputRef.current?.click()}
               disabled={running || uploadingAttachment}
-              title="Attach a local file"
+              title="Attach files (bulk or sequential)"
             >
               <svg className="icon" viewBox="0 0 24 24">
                 <path d="M12 5v14M5 12h14" />
@@ -1059,6 +1262,7 @@ export default function NewTaskScreen({
               id="file-input"
               ref={fileInputRef}
               onChange={handleFileChange}
+              multiple
               hidden
             />
 
@@ -1081,7 +1285,7 @@ export default function NewTaskScreen({
               className="send-btn"
               id="send-btn"
               onClick={() => runTask()}
-              disabled={(!taskInput.trim() && !attachedFile && taggedVaultFiles.length === 0) || running}
+              disabled={(!taskInput.trim() && attachedFiles.length === 0 && taggedVaultFiles.length === 0) || running}
               title="Run task"
             >
               <svg className="icon" viewBox="0 0 24 24">
@@ -1089,6 +1293,10 @@ export default function NewTaskScreen({
               </svg>
             </button>
           </div>
+        </div>
+
+        <div className="composer-disclaimer">
+          Kavach is an air-gapped sovereign AI. Verify critical operational outputs.
         </div>
       </div>
     </section>

@@ -11,9 +11,20 @@ from pathlib import Path
 import re
 from typing import Any, Dict, List, Optional, Union
 
-import openpyxl
-from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
-from openpyxl.utils import get_column_letter
+try:
+    import openpyxl
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+    from openpyxl.utils import get_column_letter
+    HAS_OPENPYXL = True
+except ImportError:
+    HAS_OPENPYXL = False
+    openpyxl = None
+    Alignment = None
+    Border = None
+    Font = None
+    PatternFill = None
+    Side = None
+    get_column_letter = None
 
 from backend import config
 from backend.audit.logbook import log_event
