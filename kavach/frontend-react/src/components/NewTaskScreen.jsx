@@ -50,6 +50,26 @@ const SUGGESTION_CHIPS = [
     ),
   },
   {
+    label: "Excel Sheet",
+    prefill: "Create a generator fuel and cost analysis spreadsheet with formulas: ",
+    icon: (
+      <svg className="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+        <rect x="3" y="3" width="18" height="18" rx="2" strokeWidth="2" />
+        <path d="M3 9h18M3 15h18M9 3v18M15 3v18" strokeWidth="1.5" />
+      </svg>
+    ),
+  },
+  {
+    label: "PPT Slides",
+    prefill: "Create a 4-slide executive presentation briefing on ",
+    icon: (
+      <svg className="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+        <rect x="2" y="3" width="20" height="14" rx="2" strokeWidth="2" />
+        <path d="M8 21h8M12 17v4" strokeWidth="2" strokeLinecap="round" />
+      </svg>
+    ),
+  },
+  {
     label: "Analyze Scan",
     prefill: "Analyze this scanned document: ",
     icon: (

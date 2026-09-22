@@ -108,14 +108,14 @@ def _matches_vault_document(task_lower: str, doc_names: Optional[List[str]] = No
     return False
 
 
-VALID_TOOLS = {"llm", "search", "calc", "vision", "document", "code", "ocr"}
+VALID_TOOLS = {"llm", "search", "calc", "vision", "document", "code", "ocr", "excel", "ppt"}
 
 MASTER_PLAN_PROMPT_TEMPLATE = """You are the master task planner for KAVACH, an autonomous on-premises industrial operations assistant.
 Break down the user's request into the minimum necessary number of ordered sub-tasks (1 to 8 steps).
 
 {vault_section}
 CRITICAL RULES:
-1. MINIMALITY: If the request is a single action, simple question, search, code request, or calculation, output EXACTLY 1 step.
+1. MINIMALITY: If the request is a single action, simple question, search, code request, calculation, spreadsheet, or presentation, output EXACTLY 1 step.
 2. DYNAMIC KNOWLEDGE VAULT RETRIEVAL:
    - Check the "Available Knowledge Vault Documents" list above.
    - If the user's request asks about, references, or requires information from ANY of the available documents in the Knowledge Vault (or asks about specifications, procedures, policies, guidelines, architecture, or domain context that might be contained in them), you MUST plan a 'search' step to retrieve the source excerpts from the Knowledge Vault!
@@ -125,12 +125,12 @@ CRITICAL RULES:
      Step 2 'llm' to write the poem or analysis based on the image description.
      Step 3 'code' to generate and execute the requested Python script in the Docker sandbox.
      CRITICAL: NEVER put coding, calculations, poems, or document drafting into a 'vision' step! The 'vision' tool CAN ONLY inspect and describe images.
-   - Code + Document: Step 1 'code' to run script in sandbox, Step 2 'document' to create Word report.
-   - Search + Calc / Code / Document: Step 1 'search', Step 2 'calc' or 'code' or 'document'.
+   - Code + Document / Excel / PPT: Step 1 'code' to run script in sandbox, Step 2 'document', 'excel', or 'ppt' to create deliverable.
+   - Search + Calc / Code / Document / Excel / PPT: Step 1 'search', Step 2 'calc' or 'code' or 'document' or 'excel' or 'ppt'.
 4. ATOMIC TOOL STEPS: Never split the execution of a single capability into multiple steps (e.g. do NOT create separate 'write code', 'run code', 'verify code' steps — a coding task is ONE step with tool 'code').
 5. Each step must be a concrete, actionable sub-task with:
    - "step_num": integer (1, 2, 3, ...)
-   - "tool": one of ["search", "calc", "code", "document", "ocr", "vision", "llm"]
+   - "tool": one of ["search", "calc", "code", "document", "ocr", "vision", "llm", "excel", "ppt"]
    - "input": clear specific instruction for that step
 
 Capabilities:
@@ -138,6 +138,8 @@ Capabilities:
 - "calc": Numerical arithmetic, formulas, remaining life, corrosion rates, or unit conversions.
 - "code": Generate and run Python/JS/C scripts in the secure Docker container sandbox.
 - "document": Draft formal corporate Word (.docx) documents, reports, or SOPs.
+- "excel": Generate structured Excel spreadsheets (.xlsx) with columns, rows, formulas (SUM, AVERAGE, multiplication), and summary totals.
+- "ppt": Generate structured PowerPoint slide decks (.pptx) with widescreen layouts and speaker notes.
 - "ocr": Read and extract text from scanned images or inspection sheets.
 - "vision": Inspect diagrams, schematics, photos, or gauges.
 - "llm": Direct answering, general explanation, or conversational reasoning for generic topics not in the vault.
@@ -149,10 +151,23 @@ Output:
   {{"step_num": 1, "tool": "search", "input": "Search the SOPs for who must be notified during a Severity 1 incident."}}
 ]
 
-Request: "Write and run a python script that prints 'KAVACH_SANDBOX_ONLINE' and the value of 14 * 7"
+Request: "Create a generator fuel consumption log spreadsheet with 5 entries, rate calculations, and total sum"
 Output:
 [
-  {{"step_num": 1, "tool": "code", "input": "Write and run a python script that prints 'KAVACH_SANDBOX_ONLINE' and the value of 14 * 7"}}
+  {{"step_num": 1, "tool": "excel", "input": "Create a generator fuel consumption log spreadsheet with 5 entries, rate calculations, and total sum"}}
+]
+
+Request: "Create a 4-slide executive presentation on plant emergency shutdown procedures"
+Output:
+[
+  {{"step_num": 1, "tool": "ppt", "input": "Create a 4-slide executive presentation on plant emergency shutdown procedures"}}
+]
+
+Request: "Search for boiler temperature limits in the manual, then create an Excel spreadsheet tracking the daily sensor readings with formulas"
+Output:
+[
+  {{"step_num": 1, "tool": "search", "input": "Search Knowledge Vault for boiler temperature limits and sensor specs"}},
+  {{"step_num": 2, "tool": "excel", "input": "Generate Excel spreadsheet tracking daily boiler temperature readings against retrieved limits with formulas"}}
 ]
 
 Request: "Write a python code for basic calculation like plus, minus, divide, and multiply to execute 50*10 and then create a document for this code"

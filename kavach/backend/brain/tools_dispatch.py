@@ -18,7 +18,9 @@ from backend.engine import ollama, registry
 from backend.guard.approve import assess_risk, request_approval
 from backend.tools.calc import calculate as calc_tool
 from backend.tools.code import write_and_run as code_tool_run
+from backend.tools.excel import draft_spreadsheet, render_xlsx
 from backend.tools.ocr import extract_text as ocr_tool_extract
+from backend.tools.ppt import draft_presentation, render_pptx
 from backend.tools.search import search as search_tool
 from backend.tools.vision import describe_image as vision_tool_describe
 from backend.tools.writer import draft_document, render_docx
@@ -71,6 +73,17 @@ def _extract_key_facts(tool: str, output: str, meta: Dict[str, Any], is_error: b
         facts["document_path"] = meta.get("file_path")
         facts["document_awaiting_approval"] = meta.get("awaiting_approval", False)
 
+    elif tool == "excel":
+        facts["excel_title"] = meta.get("title")
+        facts["excel_path"] = meta.get("file_path")
+        facts["excel_sheets"] = meta.get("sheets")
+        facts["excel_rows"] = meta.get("total_rows")
+
+    elif tool == "ppt":
+        facts["ppt_title"] = meta.get("title")
+        facts["ppt_path"] = meta.get("file_path")
+        facts["ppt_slides_count"] = meta.get("slides_count")
+
     elif tool == "ocr":
         facts["ocr_engine"] = meta.get("engine")
         facts["ocr_confidence"] = meta.get("confidence")
@@ -112,7 +125,7 @@ def dispatch_tool(
     log_tool(tool, "DISPATCH", f"Input: '{_truncate(step_input, 85)}'")
     key_facts_ctx = state.get("key_facts", {})
     injected_input = step_input
-    if key_facts_ctx and tool in ("calc", "code", "document", "llm"):
+    if key_facts_ctx and tool in ("calc", "code", "document", "llm", "excel", "ppt"):
         facts_summary = json.dumps(key_facts_ctx, indent=2)
         if "Accumulated Key Facts" not in injected_input:
             injected_input = f"{step_input}\n\n[Known Context & Facts from Earlier Steps]:\n{facts_summary}"
@@ -372,6 +385,119 @@ def dispatch_tool(
             output = f"[error] document generation failed: {exc}"
             is_error = True
             sources = None
+
+    elif tool == "excel":
+        actor = registry.get_model("reasoning")
+        prior_sources = []
+        for prev_out in state.get("step_outputs", []):
+            if prev_out.get("tool") == "search" and prev_out.get("sources"):
+                prior_sources.extend(prev_out["sources"])
+
+        try:
+            excel_topic = step_input
+            if state.get("shared_memory"):
+                excel_topic = f"{step_input}\n\nContext & Results from Prior Execution:\n{state['shared_memory']}"
+
+            structured_xl = draft_spreadsheet(
+                excel_topic,
+                sources=prior_sources,
+                model=actor,
+            )
+            file_path = render_xlsx(structured_xl)
+            filename = file_path.name
+            title = structured_xl.get("title", "Spreadsheet")
+            sheets = [s.get("name") for s in structured_xl.get("sheets", [])]
+            total_rows = sum(len(s.get("rows", [])) for s in structured_xl.get("sheets", []))
+
+            log_event(
+                task_id=state.get("task_id"),
+                event_type="write",
+                actor="excel_tool",
+                summary=f"Rendered Excel spreadsheet '{title}' ({len(sheets)} sheets, {total_rows} rows) -> {filename}",
+                metadata={
+                    "filename": filename,
+                    "file_path": str(file_path),
+                    "title": title,
+                    "sheets": sheets,
+                    "total_rows": total_rows,
+                },
+                external_calls=0,
+            )
+
+            output = (
+                f"Generated Excel spreadsheet '{title}' saved to {filename}.\n"
+                f"File path: {file_path}\n"
+                f"Sheets: {', '.join(sheets)} ({total_rows} total rows with formulas)"
+            )
+            is_error = False
+            doc_meta = {
+                "file_path": str(file_path),
+                "filename": filename,
+                "title": title,
+                "file_type": "excel",
+                "sheets": sheets,
+                "total_rows": total_rows,
+                "awaiting_approval": False,
+            }
+        except Exception as exc:
+            logger.error(f"[TOOLS_DISPATCH] Excel tool failed: {exc}")
+            output = f"[error] Excel spreadsheet generation failed: {exc}"
+            is_error = True
+
+    elif tool == "ppt":
+        actor = registry.get_model("reasoning")
+        prior_sources = []
+        for prev_out in state.get("step_outputs", []):
+            if prev_out.get("tool") == "search" and prev_out.get("sources"):
+                prior_sources.extend(prev_out["sources"])
+
+        try:
+            ppt_topic = step_input
+            if state.get("shared_memory"):
+                ppt_topic = f"{step_input}\n\nContext & Results from Prior Execution:\n{state['shared_memory']}"
+
+            structured_ppt = draft_presentation(
+                ppt_topic,
+                sources=prior_sources,
+                model=actor,
+            )
+            file_path = render_pptx(structured_ppt)
+            filename = file_path.name
+            title = structured_ppt.get("title", "Presentation")
+            slides_count = len(structured_ppt.get("slides", []))
+
+            log_event(
+                task_id=state.get("task_id"),
+                event_type="write",
+                actor="ppt_tool",
+                summary=f"Rendered PowerPoint presentation '{title}' ({slides_count} slides) -> {filename}",
+                metadata={
+                    "filename": filename,
+                    "file_path": str(file_path),
+                    "title": title,
+                    "slides_count": slides_count,
+                },
+                external_calls=0,
+            )
+
+            output = (
+                f"Generated PowerPoint presentation '{title}' ({slides_count} slides) saved to {filename}.\n"
+                f"File path: {file_path}\n"
+                f"Layout: 16:9 Widescreen Dark Industrial Theme with Speaker Notes"
+            )
+            is_error = False
+            doc_meta = {
+                "file_path": str(file_path),
+                "filename": filename,
+                "title": title,
+                "file_type": "ppt",
+                "slides_count": slides_count,
+                "awaiting_approval": False,
+            }
+        except Exception as exc:
+            logger.error(f"[TOOLS_DISPATCH] PPT tool failed: {exc}")
+            output = f"[error] PowerPoint presentation generation failed: {exc}"
+            is_error = True
 
     else:
         actor = tool

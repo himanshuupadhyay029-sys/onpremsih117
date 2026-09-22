@@ -15,6 +15,8 @@ const TOOL_LABELS = {
   ocr: 'Document OCR',
   vision: 'Image analysis',
   document: 'Document writer',
+  excel: 'Spreadsheet builder',
+  ppt: 'Presentation designer',
 };
 
 export default function MessageTurn({
@@ -547,9 +549,29 @@ export default function MessageTurn({
           <InteractiveCodeCard key={cIdx} run={run} cIdx={cIdx} />
         ))}
 
-        {/* Generated Documents */}
+        {/* Generated Documents & Real Deliverables (Word, Excel, PowerPoint) */}
         {generatedFiles.map((file, fIdx) => {
           if (!file.filename) return null;
+          const fn = file.filename.toLowerCase();
+          const isXlsx = fn.endsWith('.xlsx') || fn.endsWith('.csv') || file.file_type === 'excel';
+          const isPptx = fn.endsWith('.pptx') || file.file_type === 'ppt';
+          const isDocx = fn.endsWith('.docx') || file.file_type === 'document' || (!isXlsx && !isPptx);
+
+          const cardClass = isXlsx
+            ? 'deliverable-card deliverable-xlsx'
+            : isPptx
+            ? 'deliverable-card deliverable-pptx'
+            : 'deliverable-card deliverable-docx';
+
+          const tagClass = isXlsx ? 'tag-xlsx' : isPptx ? 'tag-pptx' : 'tag-docx';
+          const tagLabel = isXlsx
+            ? '📊 EXCEL SPREADSHEET (.xlsx)'
+            : isPptx
+            ? '📽️ PRESENTATION DECK (.pptx)'
+            : '📘 FORMAL REPORT (.docx)';
+
+          const btnClass = isXlsx ? 'btn-xlsx' : isPptx ? 'btn-pptx' : 'btn-docx';
+
           const fileSources = [
             ...new Set(
               (file.sources || turn.sources || meta.sources || [])
@@ -559,20 +581,56 @@ export default function MessageTurn({
           ];
 
           return (
-            <div key={fIdx} className="card">
-              <p className="section-label">Generated document</p>
-              <a
-                className="download-btn"
-                href={`/download/${encodeURIComponent(file.filename)}`}
-                download
-              >
-                <svg className="icon icon-sm" viewBox="0 0 24 24">
-                  <path d="M12 4v12M7 13l5 5 5-5" />
-                  <path d="M4 20h16" />
-                </svg>
-                <span>{file.title || file.filename}</span>
-              </a>
-              {fileSources.length > 0 && (
+            <div key={fIdx} className={`card ${cardClass}`}>
+              <div className="deliverable-header">
+                <span className={`deliverable-tag ${tagClass}`}>{tagLabel}</span>
+                {isXlsx && file.total_rows && (
+                  <span className="code-lang-badge" style={{ background: 'rgba(16, 185, 129, 0.15)', color: '#34d399' }}>
+                    {file.total_rows} data rows · formulas active
+                  </span>
+                )}
+                {isPptx && file.slides_count && (
+                  <span className="code-lang-badge" style={{ background: 'rgba(249, 115, 22, 0.15)', color: '#fb923c' }}>
+                    {file.slides_count} slides · 16:9 widescreen
+                  </span>
+                )}
+              </div>
+
+              <div>
+                <a
+                  className={`download-btn ${btnClass}`}
+                  href={`/download/${encodeURIComponent(file.filename)}`}
+                  download
+                >
+                  {isXlsx ? (
+                    <svg className="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                      <rect x="3" y="3" width="18" height="18" rx="2" strokeWidth="2" />
+                      <path d="M3 9h18M3 15h18M9 3v18M15 3v18" strokeWidth="1.5" />
+                    </svg>
+                  ) : isPptx ? (
+                    <svg className="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                      <rect x="2" y="3" width="20" height="14" rx="2" strokeWidth="2" />
+                      <path d="M8 21h8M12 17v4" strokeWidth="2" strokeLinecap="round" />
+                    </svg>
+                  ) : (
+                    <svg className="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                      <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" strokeWidth="2" />
+                      <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" strokeWidth="2" strokeLinecap="round" />
+                    </svg>
+                  )}
+                  <span>Download {file.title || file.filename}</span>
+                </a>
+              </div>
+
+              {isXlsx && file.sheets && file.sheets.length > 0 && (
+                <div className="deliverable-meta-details">
+                  <span className="deliverable-meta-item">
+                    <strong>Sheets:</strong> {file.sheets.join(', ')}
+                  </span>
+                </div>
+              )}
+
+              {isDocx && fileSources.length > 0 && (
                 <div className="doc-sources-meta">
                   <span className="doc-sources-label">Sources cited in file:</span>
                   <span className="doc-sources-names">{fileSources.join(', ')}</span>
