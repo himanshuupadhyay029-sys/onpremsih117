@@ -378,6 +378,159 @@ a:hover { color: var(--kavach-accent-hover); text-decoration: underline; }
   color: var(--text-tertiary);
 }
 
+/* Attachment Tray & Multi-File Chips */
+.composer.is-drag-over {
+  border-color: var(--kavach-accent) !important;
+  background: var(--kavach-accent-muted) !important;
+  box-shadow: 0 0 0 3px rgba(79, 168, 216, 0.25) !important;
+}
+
+.attachment-tray {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--hairline);
+}
+
+.attachment-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px 5px 6px;
+  background: var(--bg-page);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+  transition: all var(--ease);
+  max-width: 220px;
+}
+
+.attachment-chip:hover {
+  border-color: rgba(0, 0, 0, 0.18);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
+}
+
+.attachment-chip.is-uploading {
+  opacity: 0.85;
+  border-style: dashed;
+}
+
+.attachment-chip.is-error {
+  border-color: rgba(194, 85, 77, 0.4);
+  background: rgba(194, 85, 77, 0.05);
+}
+
+.attachment-chip-preview {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.attachment-chip-preview.preview-pdf {
+  background: rgba(239, 68, 68, 0.12);
+  color: #dc2626;
+}
+
+.attachment-chip-preview.preview-img {
+  background: rgba(59, 130, 246, 0.12);
+  color: #2563eb;
+}
+
+.attachment-chip-preview.preview-doc {
+  background: rgba(99, 102, 241, 0.12);
+  color: #4f46e5;
+}
+
+.attachment-chip-preview.preview-sheet {
+  background: rgba(16, 185, 129, 0.12);
+  color: #059669;
+}
+
+.attachment-chip-preview.preview-default {
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+}
+
+.attachment-chip-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.attachment-chip-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 1px;
+}
+
+.attachment-chip-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 130px;
+}
+
+.attachment-chip-meta {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.attachment-chip-remove {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin-left: 2px;
+  flex-shrink: 0;
+  transition: all var(--ease);
+}
+
+.attachment-chip-remove:hover {
+  background: var(--bg-hover);
+  color: var(--status-alert);
+}
+
+.attachment-clear-all {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  margin-left: auto;
+  transition: all var(--ease);
+}
+
+.attachment-clear-all:hover {
+  color: var(--status-alert);
+  background: rgba(194, 85, 77, 0.08);
+}
+
+/* Backward compatibility */
 .attachment {
   display: inline-flex;
   align-items: center;
@@ -1885,6 +2038,39 @@ a:hover { color: var(--kavach-accent-hover); text-decoration: underline; }
   font-weight: 500;
   color: var(--kavach-accent);
   width: fit-content;
+}
+
+.chat-user-attachments-tray {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  width: 100%;
+}
+
+.chat-user-attachment-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  background: rgba(255, 255, 255, 0.65);
+  border: 1px solid rgba(79, 168, 216, 0.25);
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary);
+  max-width: 220px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+}
+
+.chat-user-attachment-badge svg {
+  flex-shrink: 0;
+  color: var(--kavach-accent);
+}
+
+.chat-user-attachment-badge span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .chat-msg-user .chat-msg-content {

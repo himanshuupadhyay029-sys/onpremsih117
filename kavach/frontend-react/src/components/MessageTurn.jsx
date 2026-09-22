@@ -188,27 +188,45 @@ export default function MessageTurn({
   // USER TURN (Right-aligned bubble matching Claude)
   // -------------------------------------------------------------------------
   if (isUser) {
-    const attachedFileName =
-      turn.attachedFile?.name ||
-      meta.filename ||
-      meta.attachment_name ||
-      (turn.content && turn.content.includes("Attached file:")
-        ? turn.content.split("Attached file:")[1].trim().split("\n")[0]
-        : null);
+    let userAttachments = [];
+    if (Array.isArray(turn.attachments) && turn.attachments.length > 0) {
+      userAttachments = turn.attachments;
+    } else if (Array.isArray(meta.attachments) && meta.attachments.length > 0) {
+      userAttachments = meta.attachments;
+    } else if (turn.content && turn.content.includes("Attached file:")) {
+      const lines = turn.content.split("\n");
+      const matched = lines
+        .filter((l) => l.trim().startsWith("Attached file:"))
+        .map((l) => {
+          const rawPath = l.replace("Attached file:", "").trim();
+          const name = rawPath.split(/[\\/]/).pop();
+          return { name, path: rawPath };
+        });
+      if (matched.length > 0) userAttachments = matched;
+    } else if (turn.attachedFile?.name || meta.filename || meta.attachment_name) {
+      userAttachments = [{ name: turn.attachedFile?.name || meta.filename || meta.attachment_name }];
+    }
 
-    const userText = turn.content && turn.content.includes("\n\nAttached file:")
-      ? turn.content.split("\n\nAttached file:")[0]
-      : turn.content;
+    let userText = turn.content || '';
+    if (userText.includes("\n\nAttached file:")) {
+      userText = userText.split("\n\nAttached file:")[0];
+    } else if (userText.includes("Attached file:")) {
+      userText = userText.replace(/Attached file:[^\n]+(\n|$)/g, '').trim();
+    }
 
     return (
       <div className="chat-msg-row chat-msg-row-user" id={`turn-${turn.id}`}>
         <div className="chat-msg chat-msg-user">
-          {attachedFileName && (
-            <div className="chat-user-attachment">
-              <svg className="icon icon-sm" viewBox="0 0 24 24">
-                <path d="M14 4l-7.5 7.5a3 3 0 004.2 4.2L18 8.5" />
-              </svg>
-              <span>{attachedFileName}</span>
+          {userAttachments.length > 0 && (
+            <div className="chat-user-attachments-tray">
+              {userAttachments.map((att, idx) => (
+                <div className="chat-user-attachment-badge" key={idx} title={att.name || att.path}>
+                  <svg className="icon icon-sm" viewBox="0 0 24 24">
+                    <path d="M14 4l-7.5 7.5a3 3 0 004.2 4.2L18 8.5" />
+                  </svg>
+                  <span>{att.name || (att.path ? att.path.split(/[\\/]/).pop() : 'Attached File')}</span>
+                </div>
+              ))}
             </div>
           )}
           <div className="chat-msg-content">{userText}</div>
