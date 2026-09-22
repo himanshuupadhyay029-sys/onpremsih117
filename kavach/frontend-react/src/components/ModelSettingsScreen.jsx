@@ -32,7 +32,32 @@ export default function ModelSettingsScreen() {
   const [pullError, setPullError] = useState(null);
   const [pullSuccess, setPullSuccess] = useState(false);
 
+  // Model deletion modal states
+  const [modelToDelete, setModelToDelete] = useState(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState(null);
+
   const abortControllerRef = useRef(null);
+
+  // Close modal on ESC key
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape' && modelToDelete && !isDeleting) {
+        setModelToDelete(null);
+        setDeleteError(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [modelToDelete, isDeleting]);
+
+  // Compute if model pending deletion is assigned to any roles
+  const assignedRolesForDelete = useMemo(() => {
+    if (!modelToDelete || !registry) return [];
+    return Object.entries(registry)
+      .filter(([_, m]) => m === modelToDelete)
+      .map(([role]) => role);
+  }, [modelToDelete, registry]);
 
   useEffect(() => {
     fetchModels();
@@ -111,16 +136,29 @@ export default function ModelSettingsScreen() {
     }
   };
 
-  const handleDelete = async (modelName) => {
-    if (!confirm(`Are you sure you want to delete ${modelName}?`)) return;
+  const promptDeleteModel = (modelName) => {
+    setModelToDelete(modelName);
+    setDeleteError(null);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!modelToDelete || isDeleting) return;
     try {
-      const res = await fetch(`${API_BASE}/models/${encodeURIComponent(modelName)}`, {
+      setIsDeleting(true);
+      setDeleteError(null);
+      const res = await fetch(`${API_BASE}/models/${encodeURIComponent(modelToDelete)}`, {
         method: 'DELETE'
       });
-      if (!res.ok) throw new Error('Failed to delete model');
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || 'Failed to delete model');
+      }
       await fetchModels();
+      setModelToDelete(null);
     } catch (err) {
-      alert(err.message);
+      setDeleteError(err.message);
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -303,13 +341,15 @@ export default function ModelSettingsScreen() {
               <li key={m} className="installed-model-item">
                 <span className="model-name">{m}</span>
                 <button 
+                  type="button"
                   className="btn btn-sm btn-danger" 
-                  onClick={() => handleDelete(m)}
+                  onClick={() => promptDeleteModel(m)}
                   title="Delete Model"
                 >
                   <svg className="icon" viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" fill="none">
                     <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"></path>
                   </svg>
+                  <span>Delete</span>
                 </button>
               </li>
             ))}
@@ -513,6 +553,93 @@ export default function ModelSettingsScreen() {
           </div>
         )}
       </div>
+
+      {/* In-App Model Deletion Confirmation Modal */}
+      {modelToDelete && (
+        <div
+          className="confirm-overlay"
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !isDeleting) {
+              setModelToDelete(null);
+              setDeleteError(null);
+            }
+          }}
+        >
+          <div className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-modal-title">
+            <div className="confirm-header">
+              <div className="confirm-icon-box">
+                <svg viewBox="0 0 24 24" style={{ width: '22px', height: '22px', stroke: 'currentColor', fill: 'none', strokeWidth: '2' }}>
+                  <polyline points="3 6 5 6 21 6" />
+                  <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
+                  <line x1="10" y1="11" x2="10" y2="17" />
+                  <line x1="14" y1="11" x2="14" y2="17" />
+                </svg>
+              </div>
+              <div className="confirm-title-area">
+                <h3 className="confirm-title" id="confirm-modal-title">Delete Model</h3>
+                <p className="confirm-desc">
+                  Are you sure you want to delete <span className="confirm-file-badge">{modelToDelete}</span> from local Ollama storage?
+                </p>
+              </div>
+            </div>
+
+            {assignedRolesForDelete.length > 0 ? (
+              <div className="confirm-warning-box" style={{ background: 'rgba(239, 68, 68, 0.1)', borderColor: 'rgba(239, 68, 68, 0.3)', color: '#ef4444' }}>
+                <svg className="icon icon-sm" viewBox="0 0 24 24" style={{ width: '16px', height: '16px', stroke: 'currentColor', fill: 'none', flexShrink: 0 }}>
+                  <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                  <line x1="12" y1="9" x2="12" y2="13" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                  <line x1="12" y1="17" x2="12.01" y2="17" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                <span>Currently assigned to <strong>{assignedRolesForDelete.join(', ')}</strong>. Deleting will leave those task roles unassigned.</span>
+              </div>
+            ) : (
+              <div className="confirm-warning-box">
+                <svg className="icon icon-sm" viewBox="0 0 24 24" style={{ width: '16px', height: '16px', stroke: 'currentColor', fill: 'none', flexShrink: 0 }}>
+                  <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                  <line x1="12" y1="9" x2="12" y2="13" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                  <line x1="12" y1="17" x2="12.01" y2="17" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                <span>This will permanently delete the model weights from disk and reclaim storage space.</span>
+              </div>
+            )}
+
+            {deleteError && (
+              <div style={{ color: '#ef4444', fontSize: '12.5px', padding: '8px 12px', background: 'rgba(239, 68, 68, 0.1)', borderRadius: '6px', border: '1px solid rgba(239, 68, 68, 0.25)' }}>
+                {deleteError}
+              </div>
+            )}
+
+            <div className="confirm-actions">
+              <button
+                type="button"
+                className="confirm-btn-cancel"
+                onClick={() => {
+                  setModelToDelete(null);
+                  setDeleteError(null);
+                }}
+                disabled={isDeleting}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="confirm-btn-danger"
+                onClick={handleConfirmDelete}
+                disabled={isDeleting}
+              >
+                {isDeleting ? (
+                  <>
+                    <span className="spinner-micro" />
+                    <span>Deleting…</span>
+                  </>
+                ) : (
+                  'Delete Model'
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <style dangerouslySetInnerHTML={{__html: `
         .model-settings-screen {
