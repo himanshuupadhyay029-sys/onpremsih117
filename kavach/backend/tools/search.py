@@ -65,10 +65,10 @@ def _check_is_grounded(answer: str) -> bool:
     return not any(indicator in ans_lower for indicator in UNGROUNDED_INDICATORS)
 
 
-def search(query: str, task_id: Optional[str] = None) -> Dict:
+def search(query: str, task_id: Optional[str] = None, user_id: Optional[str] = None) -> Dict:
     t0 = time.perf_counter()
     log_tool("vault", "SEARCH", f"Query: '{_truncate(query, 70)}'")
-    results = retrieve(query)
+    results = retrieve(query, user_id=user_id)
 
     if not results:
         answer = "I don't have enough information in the knowledge vault to answer this."
@@ -80,8 +80,10 @@ def search(query: str, task_id: Optional[str] = None) -> Dict:
             summary=f"Search for '{query}': no vault documents matched (grounded=False)",
             metadata={"query": query, "sources_used": [], "grounded": False},
             external_calls=0,
+            user_id=user_id,
         )
         return {"answer": answer, "sources": [], "grounded": False}
+
 
     # Format structured evidence blocks with explicit source IDs [1], [2]
     source_blocks = []

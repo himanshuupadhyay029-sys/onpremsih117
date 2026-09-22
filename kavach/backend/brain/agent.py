@@ -21,7 +21,7 @@ import uuid
 
 from langgraph.graph import END, StateGraph
 
-from backend.audit.logbook import log_event
+from backend.audit.logbook import log_event, set_current_user_id
 from backend.brain.event_bus import emit_sync
 from backend.brain.router import route
 from backend.brain.state import AgentState
@@ -1457,9 +1457,14 @@ def run_agent(
     history: Optional[List[dict]] = None,
     initial_key_facts: Optional[Dict[str, Any]] = None,
     resume_state: Optional[AgentState] = None,
+    user_id: Optional[str] = None,
 ) -> dict:
+    if user_id:
+        set_current_user_id(user_id)
+
     if not task_id:
         task_id = str(uuid.uuid4())
+
 
     t_agent_start = time.perf_counter()
     log_graph_start(task_id, task, history_len=len(history or []), facts_count=len(initial_key_facts or {}))

@@ -144,9 +144,20 @@ export default function App() {
               onChatsUpdated={loadChats}
             />
           )}
-          {activeScreen === 'vault' && <KnowledgeVaultScreen />}
-          {activeScreen === 'audit' && <AuditLogScreen />}
+          {activeScreen === 'vault' && (
+            <KnowledgeVaultScreen
+              user={user}
+              onShowAuth={() => setShowAuthModal(true)}
+            />
+          )}
+          {activeScreen === 'audit' && (
+            <AuditLogScreen
+              user={user}
+              onShowAuth={() => setShowAuthModal(true)}
+            />
+          )}
           {activeScreen === 'models' && <ModelSettingsScreen />}
+
         </div>
       </main>
 

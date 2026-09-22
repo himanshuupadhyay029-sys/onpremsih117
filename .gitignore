@@ -37,8 +37,11 @@ kavach/frontend-react/node_modules/.vite/
 # Uploaded test files & runtime documents
 knowledge/uploads/
 kavach/knowledge/uploads/
+knowledge/users/
+kavach/knowledge/users/
 testdata/synthetic_scans/
 kavach/testdata/synthetic_scans/
+
 
 # Documentation ignored per user request
 TECHNICAL_CONTEXT.md

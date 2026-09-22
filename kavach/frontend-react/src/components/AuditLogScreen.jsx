@@ -1,6 +1,23 @@
 import React, { useState, useEffect, useMemo } from 'react';
 
-export default function AuditLogScreen() {
+function formatDateTime(isoStr) {
+  if (!isoStr) return '';
+  try {
+    const d = new Date(isoStr);
+    return d.toLocaleString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
+  } catch {
+    return isoStr;
+  }
+}
+
+export default function AuditLogScreen({ user, onShowAuth }) {
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filterType, setFilterType] = useState('');
@@ -8,8 +25,17 @@ export default function AuditLogScreen() {
   const [openTaskGroups, setOpenTaskGroups] = useState({});
 
   const fetchAuditEvents = async () => {
+    if (!user) {
+      setEvents([]);
+      setLoading(false);
+      return;
+    }
     try {
-      const res = await fetch('/audit');
+      const res = await fetch('/audit', { credentials: 'include' });
+      if (!res.ok) {
+        if (res.status === 401) setEvents([]);
+        return;
+      }
       const data = await res.json();
       const rawEvents = data.events || [];
       // reverse so newest tasks appear at the top
@@ -35,9 +61,11 @@ export default function AuditLogScreen() {
 
   useEffect(() => {
     fetchAuditEvents();
+    if (!user) return;
     const interval = setInterval(fetchAuditEvents, 5000);
     return () => clearInterval(interval);
-  }, []);
+  }, [user?.id]);
+
 
   // Group events by task_id and extract original task question per task
   const groupedTasks = useMemo(() => {
@@ -106,6 +134,67 @@ export default function AuditLogScreen() {
     }));
   };
 
+  if (!user) {
+    return (
+      <section className="screen screen-wide">
+        <div className="screen-head">
+          <h2 className="screen-title">Audit Logbook</h2>
+          <p className="screen-sub">
+            Immutable, append-only trail of all routing, planning, and tool executions with strict sovereignty verification.
+          </p>
+        </div>
+
+        <div style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '60px 20px',
+          background: 'rgba(255, 255, 255, 0.02)',
+          border: '1px dashed rgba(255, 255, 255, 0.12)',
+          borderRadius: '12px',
+          marginTop: '20px',
+          textAlign: 'center',
+        }}>
+          <div style={{
+            width: '56px',
+            height: '56px',
+            borderRadius: '50%',
+            background: 'rgba(99, 102, 241, 0.15)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            marginBottom: '16px',
+          }}>
+            <svg viewBox="0 0 24 24" width="28" height="28" stroke="#818cf8" fill="none" strokeWidth="2">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+            </svg>
+          </div>
+          <h3 style={{ fontSize: '18px', fontWeight: '600', marginBottom: '8px', color: 'var(--text-primary, #fff)' }}>
+            Authentication Required
+          </h3>
+          <p style={{ maxWidth: '440px', color: 'var(--text-muted, #94a3b8)', fontSize: '14px', lineHeight: '1.5', marginBottom: '24px' }}>
+            Audit log records are strictly partitioned and private to authorized operators. Please sign in or register to review your system and agent execution trail.
+          </p>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={onShowAuth}
+            style={{
+              padding: '10px 24px',
+              fontSize: '14px',
+              fontWeight: '500',
+              borderRadius: '8px',
+              cursor: 'pointer',
+            }}
+          >
+            Sign In / Register
+          </button>
+        </div>
+      </section>
+    );
+  }
+
   return (
     <section className="screen screen-wide">
       <div className="screen-head">
@@ -153,9 +242,7 @@ export default function AuditLogScreen() {
         <div className="audit-task-groups">
           {groupedTasks.map((group) => {
             const isOpen = Boolean(openTaskGroups[group.taskId]);
-            const shortTime = group.startTime
-              ? new Date(group.startTime).toLocaleTimeString()
-              : '';
+            const shortTime = formatDateTime(group.startTime);
 
             return (
               <div
@@ -196,10 +283,9 @@ export default function AuditLogScreen() {
                 {isOpen && (
                   <div className="audit-task-events">
                     {group.events.map((ev, eIdx) => {
-                      const timeStr = ev.timestamp
-                        ? new Date(ev.timestamp).toLocaleTimeString()
-                        : '';
+                      const timeStr = formatDateTime(ev.timestamp);
                       const tool =
+
                         ev.metadata?.tool ||
                         (ev.event_type === 'search'
                           ? 'search'

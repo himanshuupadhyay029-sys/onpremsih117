@@ -17,10 +17,13 @@ import faiss
 import numpy as np
 
 import time
+from backend.audit.logbook import get_current_user_id
+from backend.engine import ollama, registry
 from backend.terminal_logger import log_tool
 from backend.vault.bm25 import BM25Index
-from backend.vault.ingest import BM25_PATH, INDEX_PATH, METADATA_PATH
+from backend.vault.ingest import get_user_paths
 from backend.vault.rerank import rerank as cross_encoder_rerank
+
 
 logger = logging.getLogger("kavach.retrieve")
 
@@ -32,26 +35,29 @@ SPARSE_WEIGHT = 0.8
 TOKEN_BUDGET_CHARS = 10000  # ~2,500 tokens budget
 
 
-def _load_all_stores():
+def _load_all_stores(user_id: Optional[str] = None):
+    target_user_id = str(user_id).strip() if user_id else get_current_user_id()
+    _, _, index_path, metadata_path, bm25_path = get_user_paths(target_user_id)
     index = None
     metadata: List[Dict] = []
     bm25 = None
 
-    if INDEX_PATH.exists() and METADATA_PATH.exists():
+    if index_path.exists() and metadata_path.exists():
         try:
-            raw_bytes = INDEX_PATH.read_bytes()
+            raw_bytes = index_path.read_bytes()
             if raw_bytes:
                 index = faiss.deserialize_index(np.frombuffer(raw_bytes, dtype=np.uint8))
-                with open(METADATA_PATH, "r", encoding="utf-8") as f:
+                with open(metadata_path, "r", encoding="utf-8") as f:
                     metadata = json.load(f)
         except Exception:
             index = None
             metadata = []
 
-    if BM25_PATH.exists():
-        bm25 = BM25Index.load(BM25_PATH)
+    if bm25_path.exists():
+        bm25 = BM25Index.load(bm25_path)
 
     return index, metadata, bm25
+
 
 
 def _cosine_sim(a: np.ndarray, b: np.ndarray) -> float:
@@ -207,6 +213,7 @@ def retrieve(
     candidate_k: int = DEFAULT_CANDIDATE_K,
     final_k: int = DEFAULT_FINAL_K,
     rerank_threshold: float = 0.35,
+    user_id: Optional[str] = None,
 ) -> List[Dict]:
     """Executes the full hybrid retrieval pipeline:
 
@@ -217,9 +224,10 @@ def retrieve(
     5. Token Budget Packing & Citation Metadata enrichment.
     """
     t0 = time.perf_counter()
-    index, metadata, bm25 = _load_all_stores()
+    index, metadata, bm25 = _load_all_stores(user_id=user_id)
     if index is None or index.ntotal == 0 or not metadata:
         return []
+
 
     # 1. Dense Vector Search (FAISS)
     embed_model = registry.get_model("embedding")

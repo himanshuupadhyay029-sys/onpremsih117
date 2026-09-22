@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 
-export default function KnowledgeVaultScreen() {
+export default function KnowledgeVaultScreen({ user, onShowAuth }) {
   const [documents, setDocuments] = useState([]);
   const [totalChunks, setTotalChunks] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -11,12 +11,22 @@ export default function KnowledgeVaultScreen() {
   const fileInputRef = useRef(null);
 
   const fetchKnowledgeList = async () => {
+    if (!user) {
+      setDocuments([]);
+      setTotalChunks(0);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
     try {
-      const res = await fetch('/knowledge/list');
+      const res = await fetch('/knowledge/list', { credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
         setDocuments(data.documents || []);
         setTotalChunks(data.total_chunks || 0);
+      } else if (res.status === 401) {
+        setDocuments([]);
+        setTotalChunks(0);
       }
     } catch {
       // ignore network errors
@@ -27,7 +37,7 @@ export default function KnowledgeVaultScreen() {
 
   useEffect(() => {
     fetchKnowledgeList();
-  }, []);
+  }, [user?.id]);
 
   // Handle ESC key to dismiss confirmation popup
   useEffect(() => {
@@ -42,6 +52,10 @@ export default function KnowledgeVaultScreen() {
 
   const uploadFile = async (file) => {
     if (!file) return;
+    if (!user) {
+      if (onShowAuth) onShowAuth();
+      return;
+    }
     setUploadStatus(`Ingesting ${file.name}…`);
 
     const formData = new FormData();
@@ -51,6 +65,7 @@ export default function KnowledgeVaultScreen() {
     try {
       const res = await fetch('/knowledge/upload', {
         method: 'POST',
+        credentials: 'include',
         body: formData,
       });
       
@@ -83,13 +98,14 @@ export default function KnowledgeVaultScreen() {
   };
 
   const handleConfirmDelete = async () => {
-    if (!docToDelete) return;
+    if (!docToDelete || !user) return;
     const filename = docToDelete.filename;
     setIsDeleting(true);
 
     try {
       const res = await fetch(`/knowledge/${encodeURIComponent(filename)}`, {
         method: 'DELETE',
+        credentials: 'include',
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'Failed to delete document');
@@ -122,6 +138,69 @@ export default function KnowledgeVaultScreen() {
   const handleDragLeave = () => {
     setIsDragOver(false);
   };
+
+  if (!user) {
+    return (
+      <section className="screen">
+        <div className="screen-head">
+          <h2 className="screen-title">Knowledge Vault</h2>
+          <p className="screen-sub">
+            Private on-premises document repository vectorized with local FAISS + BM25 indices.
+          </p>
+        </div>
+
+        <div style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '60px 20px',
+          background: 'rgba(255, 255, 255, 0.02)',
+          border: '1px dashed rgba(255, 255, 255, 0.12)',
+          borderRadius: '12px',
+          marginTop: '20px',
+          textAlign: 'center',
+        }}>
+          <div style={{
+            width: '56px',
+            height: '56px',
+            borderRadius: '50%',
+            background: 'rgba(99, 102, 241, 0.15)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            marginBottom: '16px',
+          }}>
+            <svg viewBox="0 0 24 24" width="28" height="28" stroke="#818cf8" fill="none" strokeWidth="2">
+              <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+              <path d="M7 11V7a5 5 0 0110 0v4" />
+            </svg>
+          </div>
+          <h3 style={{ fontSize: '18px', fontWeight: '600', marginBottom: '8px', color: 'var(--text-primary, #fff)' }}>
+            Authentication Required
+          </h3>
+          <p style={{ maxWidth: '440px', color: 'var(--text-muted, #94a3b8)', fontSize: '14px', lineHeight: '1.5', marginBottom: '24px' }}>
+            Knowledge Vault documents and vector indices are strictly isolated per user account. Please sign in or register to access your private vault.
+          </p>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={onShowAuth}
+            style={{
+              padding: '10px 24px',
+              fontSize: '14px',
+              fontWeight: '500',
+              borderRadius: '8px',
+              cursor: 'pointer',
+            }}
+          >
+            Sign In / Register
+          </button>
+        </div>
+      </section>
+    );
+  }
+
 
   return (
     <section className="screen">

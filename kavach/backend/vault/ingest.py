@@ -13,7 +13,8 @@ import json
 from pathlib import Path
 import re
 import threading
-from typing import Dict, List, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union
+
 
 import faiss
 import numpy as np
@@ -35,6 +36,16 @@ BM25_PATH = config.FAISS_INDEX_DIR / "bm25.json"
 CHILD_CHUNK_SIZE = 450
 CHILD_CHUNK_OVERLAP = 50
 PARENT_MAX_SIZE = 2000
+
+
+def get_user_paths(user_id: Optional[str] = None):
+    """Returns (uploads_dir, faiss_dir, index_path, metadata_path, bm25_path) for user."""
+    uploads_dir, faiss_dir = config.get_user_vault_dirs(user_id)
+    index_path = faiss_dir / "index.faiss"
+    metadata_path = faiss_dir / "metadata.json"
+    bm25_path = faiss_dir / "bm25.json"
+    return uploads_dir, faiss_dir, index_path, metadata_path, bm25_path
+
 
 
 def _extract_text(file_path: Path) -> str:
@@ -206,42 +217,44 @@ def _chunk_parent_section(
     return chunks
 
 
-def _load_all_indices():
-    """Loads FAISS dense index, metadata list, and BM25 sparse index."""
+def _load_all_indices(user_id: Optional[str] = None):
+    """Loads FAISS dense index, metadata list, and BM25 sparse index for a user."""
+    _, faiss_dir, index_path, metadata_path, bm25_path = get_user_paths(user_id)
     index = None
     metadata: List[Dict] = []
     bm25 = None
 
-    if INDEX_PATH.exists() and METADATA_PATH.exists():
+    if index_path.exists() and metadata_path.exists():
         try:
-            raw_bytes = INDEX_PATH.read_bytes()
+            raw_bytes = index_path.read_bytes()
             if raw_bytes:
                 index = faiss.deserialize_index(np.frombuffer(raw_bytes, dtype=np.uint8))
-                with open(METADATA_PATH, "r", encoding="utf-8") as f:
+                with open(metadata_path, "r", encoding="utf-8") as f:
                     metadata = json.load(f)
         except Exception:
             index = None
             metadata = []
 
-    if BM25_PATH.exists():
-        bm25 = BM25Index.load(BM25_PATH)
+    if bm25_path.exists():
+        bm25 = BM25Index.load(bm25_path)
 
     return index, metadata, bm25
 
 
-def _save_all_indices(index, metadata: List[Dict], bm25: BM25Index) -> None:
-    """Serializes FAISS, BM25, and metadata."""
-    config.FAISS_INDEX_DIR.mkdir(parents=True, exist_ok=True)
+def _save_all_indices(index, metadata: List[Dict], bm25: BM25Index, user_id: Optional[str] = None) -> None:
+    """Serializes FAISS, BM25, and metadata for a user."""
+    _, faiss_dir, index_path, metadata_path, bm25_path = get_user_paths(user_id)
+    faiss_dir.mkdir(parents=True, exist_ok=True)
     if index is not None:
         raw_array = faiss.serialize_index(index)
-        INDEX_PATH.write_bytes(raw_array.tobytes())
-    with open(METADATA_PATH, "w", encoding="utf-8") as f:
+        index_path.write_bytes(raw_array.tobytes())
+    with open(metadata_path, "w", encoding="utf-8") as f:
         json.dump(metadata, f, indent=2)
-    bm25.save(BM25_PATH)
+    bm25.save(bm25_path)
 
 
-def ingest_document(file_path: Union[str, Path]) -> Dict:
-    """Ingests a single document into Two-Tier Hierarchical FAISS + BM25 indices."""
+def ingest_document(file_path: Union[str, Path], user_id: Optional[str] = None) -> Dict:
+    """Ingests a single document into Two-Tier Hierarchical FAISS + BM25 indices for a user."""
     file_path = Path(file_path)
     if file_path.suffix.lower() not in SUPPORTED_EXTENSIONS:
         raise ValueError(
@@ -256,6 +269,7 @@ def ingest_document(file_path: Union[str, Path]) -> Dict:
             summary=f"Ingested '{file_path.name}': 0 chunks (no extractable text)",
             metadata={"source_filename": file_path.name, "chunk_count": 0},
             external_calls=0,
+            user_id=user_id,
         )
         return {"source_filename": file_path.name, "chunk_count": 0}
 
@@ -305,7 +319,7 @@ def ingest_document(file_path: Union[str, Path]) -> Dict:
     dim = len(vectors[0])
 
     with _lock:
-        index, metadata, _ = _load_all_indices()
+        index, metadata, _ = _load_all_indices(user_id=user_id)
 
         if index is None:
             index = faiss.IndexFlatL2(dim)
@@ -323,7 +337,7 @@ def ingest_document(file_path: Union[str, Path]) -> Dict:
         all_corpus_texts = [entry.get("chunk_text", "") for entry in metadata]
         bm25 = BM25Index().build(all_corpus_texts)
 
-        _save_all_indices(index, metadata, bm25)
+        _save_all_indices(index, metadata, bm25, user_id=user_id)
 
     log_event(
         event_type="ingest",
@@ -335,6 +349,7 @@ def ingest_document(file_path: Union[str, Path]) -> Dict:
             "child_chunk_count": len(all_new_child_entries),
         },
         external_calls=0,
+        user_id=user_id,
     )
 
     return {
@@ -344,12 +359,14 @@ def ingest_document(file_path: Union[str, Path]) -> Dict:
     }
 
 
-def delete_document(filename: str) -> Dict:
+def delete_document(filename: str, user_id: Optional[str] = None) -> Dict:
     """Removes all chunks, vectors, and BM25 index entries for a given document filename,
-    and removes the file from disk if present.
+    and removes the file from disk if present for a user.
     """
+    uploads_dir, _, index_path, metadata_path, bm25_path = get_user_paths(user_id)
+
     with _lock:
-        index, metadata, _ = _load_all_indices()
+        index, metadata, _ = _load_all_indices(user_id=user_id)
         if not metadata:
             return {"success": False, "message": "No documents in index", "deleted_chunks": 0}
 
@@ -367,12 +384,12 @@ def delete_document(filename: str) -> Dict:
             return {"success": False, "message": f"Document '{filename}' not found in index", "deleted_chunks": 0}
 
         if not remaining_meta:
-            if INDEX_PATH.exists():
-                INDEX_PATH.unlink()
-            if METADATA_PATH.exists():
-                METADATA_PATH.unlink()
-            if BM25_PATH.exists():
-                BM25_PATH.unlink()
+            if index_path.exists():
+                index_path.unlink()
+            if metadata_path.exists():
+                metadata_path.unlink()
+            if bm25_path.exists():
+                bm25_path.unlink()
         else:
             child_texts = [entry.get("chunk_text", "") for entry in remaining_meta]
 
@@ -400,10 +417,10 @@ def delete_document(filename: str) -> Dict:
             for i, entry in enumerate(remaining_meta):
                 entry["chunk_index"] = i
 
-            _save_all_indices(new_index, remaining_meta, new_bm25)
+            _save_all_indices(new_index, remaining_meta, new_bm25, user_id=user_id)
 
-        # Delete physical file from uploads if present
-        upload_file = config.PROJECT_ROOT / "knowledge" / "uploads" / filename
+        # Delete physical file from user uploads if present
+        upload_file = uploads_dir / filename
         if upload_file.exists():
             try:
                 upload_file.unlink()
@@ -416,6 +433,7 @@ def delete_document(filename: str) -> Dict:
             summary=f"Deleted document '{filename}' ({deleted_count} chunks removed)",
             metadata={"source_filename": filename, "deleted_chunks": deleted_count},
             external_calls=0,
+            user_id=user_id,
         )
 
         return {
@@ -426,11 +444,12 @@ def delete_document(filename: str) -> Dict:
         }
 
 
-def ingest_directory(dir_path: Union[str, Path]) -> List[Dict]:
+def ingest_directory(dir_path: Union[str, Path], user_id: Optional[str] = None) -> List[Dict]:
     """Ingests every supported file directly inside a folder (non-recursive)."""
     dir_path = Path(dir_path)
     results = []
     for file_path in sorted(dir_path.iterdir()):
         if file_path.is_file() and file_path.suffix.lower() in SUPPORTED_EXTENSIONS:
-            results.append(ingest_document(file_path))
+            results.append(ingest_document(file_path, user_id=user_id))
     return results
+

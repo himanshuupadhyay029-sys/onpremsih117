@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 from backend import config
 from backend.engine import registry, ollama
 from backend.audit.logbook import log_event, read_events
-from backend.auth.routes import router as auth_router, get_optional_user
+from backend.auth.routes import router as auth_router, get_optional_user, get_current_user
 from backend.brain.agent import run_agent
 from backend.brain.event_bus import emit_sync, register_task, unregister_task
 from backend.chat.routes import router as chat_router
@@ -36,8 +36,9 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 from backend.guard.approve import get_approval, resolve_approval
 from backend.terminal_logger import log_gateway, _truncate
-from backend.vault.ingest import METADATA_PATH, SUPPORTED_EXTENSIONS, ingest_document, delete_document
+from backend.vault.ingest import SUPPORTED_EXTENSIONS, ingest_document, delete_document, get_user_paths
 from backend.shield.firewall import (
+
     check_firewall_status,
     disable_firewall_lockdown,
     enable_firewall_lockdown,
@@ -199,13 +200,16 @@ def run(
     if not history and req.history:
         history = req.history
 
+    user_id_str = str(current_user.id) if current_user else None
     agent_res = run_agent(
         req.task,
         attachment_type=req.attachment_type,
         task_id=req.task_id,
         history=history,
         initial_key_facts=initial_key_facts,
+        user_id=user_id_str,
     )
+
 
     task_id_str = agent_res.get("task_id") or req.task_id or str(uuid.uuid4())
     if agent_res.get("state_snapshot"):
@@ -344,6 +348,7 @@ async def run_stream(
 
     chat_db_id = str(chat.id) if chat else None
     chat_db_title = chat.title if chat else None
+    user_id_str = str(current_user.id) if current_user else None
 
     def _execute_worker():
         worker_db = SessionLocal()
@@ -354,7 +359,9 @@ async def run_stream(
                 task_id=task_id,
                 history=history,
                 initial_key_facts=initial_key_facts,
+                user_id=user_id_str,
             )
+
             if chat_db_id:
                 try:
                     c = worker_db.query(Chat).filter(Chat.id == uuid.UUID(chat_db_id)).first()
@@ -487,11 +494,14 @@ def reply_to_agent(
     snapshot["clarify_question"] = None
     snapshot["operator_reply"] = req.reply
 
+    user_id_str = str(current_user.id) if current_user else None
     res = run_agent(
         task=req.reply,
         task_id=task_id,
         resume_state=snapshot,
+        user_id=user_id_str,
     )
+
 
     _AGENT_RUNS_CACHE[task_id] = res.get("state_snapshot", {})
 
@@ -640,8 +650,9 @@ def run_code_endpoint(req: CodeExecuteRequest):
 
 
 @app.get("/audit")
-def audit(task_id: Optional[str] = None):
-    return {"events": read_events(task_id=task_id)}
+def audit(task_id: Optional[str] = None, current_user: User = Depends(get_current_user)):
+    return {"events": read_events(user_id=str(current_user.id), task_id=task_id)}
+
 
 
 class ApprovalRequest(BaseModel):
@@ -785,13 +796,14 @@ def download_file(filename: str):
 
 
 @app.get("/knowledge/list")
-def knowledge_list():
-    """Read-only: aggregates the existing FAISS metadata.json into per-document chunk counts."""
-    if not METADATA_PATH.exists():
+def knowledge_list(current_user: User = Depends(get_current_user)):
+    """Read-only: aggregates the existing user FAISS metadata.json into per-document chunk counts."""
+    _, _, _, metadata_path, _ = get_user_paths(str(current_user.id))
+    if not metadata_path.exists():
         return {"documents": [], "total_chunks": 0}
 
     try:
-        with open(METADATA_PATH, "r", encoding="utf-8") as f:
+        with open(metadata_path, "r", encoding="utf-8") as f:
             metadata = json.load(f)
     except Exception as exc:
         return {"documents": [], "total_chunks": 0, "error": f"Metadata read error: {exc}"}
@@ -806,10 +818,13 @@ def knowledge_list():
 
 
 @app.post("/knowledge/upload")
-def knowledge_upload(file: UploadFile = File(...), ingest: bool = Form(True)):
+def knowledge_upload(
+    file: UploadFile = File(...),
+    ingest: bool = Form(True),
+    current_user: User = Depends(get_current_user),
+):
     """Saves an uploaded document and (optionally) runs it through the existing
-    Phase 4/7 ingestion pipeline. ingest=False is used by the task composer, which
-    only needs the file on disk for the ocr/vision tools to read."""
+    Phase 4/7 ingestion pipeline for the authenticated user."""
     safe_name = Path(file.filename or "upload").name
     suffix = Path(safe_name).suffix.lower()
     if suffix not in SUPPORTED_EXTENSIONS:
@@ -818,9 +833,12 @@ def knowledge_upload(file: UploadFile = File(...), ingest: bool = Form(True)):
             detail=f"Unsupported file type '{suffix}'. Supported: {sorted(SUPPORTED_EXTENSIONS)}",
         )
 
+    user_id_str = str(current_user.id)
+    uploads_dir, _, _, _, _ = get_user_paths(user_id_str)
+
     try:
         content = file.file.read()
-        dest = UPLOADS_DIR / safe_name
+        dest = uploads_dir / safe_name
         dest.write_bytes(content)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to save uploaded file: {exc}")
@@ -831,6 +849,7 @@ def knowledge_upload(file: UploadFile = File(...), ingest: bool = Form(True)):
         summary=f"Uploaded '{safe_name}' ({len(content)} bytes), ingest={ingest}",
         metadata={"filename": safe_name, "bytes": len(content), "ingest": ingest, "file_path": str(dest)},
         external_calls=0,
+        user_id=user_id_str,
     )
 
     if not ingest:
@@ -843,7 +862,7 @@ def knowledge_upload(file: UploadFile = File(...), ingest: bool = Form(True)):
         }
 
     try:
-        result = ingest_document(dest)  # logs its own "ingest" audit event
+        result = ingest_document(dest, user_id=user_id_str)  # logs its own "ingest" audit event
         chunk_count = result.get("chunk_count", 0)
         return {
             "filename": safe_name,
@@ -870,11 +889,12 @@ def knowledge_upload(file: UploadFile = File(...), ingest: bool = Form(True)):
 
 
 @app.delete("/knowledge/{filename:path}")
-def knowledge_delete(filename: str):
-    """Deletes all chunks, embeddings, and BM25 index entries for a document and removes the file from disk."""
+def knowledge_delete(filename: str, current_user: User = Depends(get_current_user)):
+    """Deletes all chunks, embeddings, and BM25 index entries for a document and removes the file from disk for user."""
     safe_name = Path(filename).name
+    user_id_str = str(current_user.id)
     try:
-        res = delete_document(safe_name)
+        res = delete_document(safe_name, user_id=user_id_str)
         if not res.get("success"):
             raise HTTPException(status_code=404, detail=res.get("message", "Document not found in vault."))
         return res
@@ -882,6 +902,7 @@ def knowledge_delete(filename: str):
         raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to delete document: {exc}")
+
 
 
 @app.get("/shield/status")
