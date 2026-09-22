@@ -252,7 +252,7 @@ export default function ModelSettingsScreen() {
     return <div className="screen-content"><div className="loader"></div></div>;
   }
 
-  const roles = ['reasoning', 'code', 'vision', 'embedding'];
+  const roles = ['reasoning', 'code', 'vision', 'embedding', 'rerank'];
 
   return (
     <div className="screen-content model-settings-screen">

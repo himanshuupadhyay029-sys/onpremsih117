@@ -28,9 +28,8 @@ from backend.shield.netinfo import detect_local_network
 SESSION_LOG_PATH = config.OUTPUTS_DIR / "sovereignty_session.jsonl"
 HISTORY_MAXLEN = 500
 
-# Names used to recognize the Ollama engine process (it runs independently of
-# our own process tree, so it can't be found via parent/child walking).
-OLLAMA_PROCESS_NAME_HINTS = ("ollama",)
+# Specifically match the Ollama inference server, excluding the desktop tray updater ("ollama app.exe")
+OLLAMA_PROCESS_NAME_HINTS = ("ollama.exe", "ollama_llama_server")
 
 _history: deque = deque(maxlen=HISTORY_MAXLEN)
 _state_lock = threading.Lock()

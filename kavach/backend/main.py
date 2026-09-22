@@ -86,9 +86,6 @@ if VANILLA_FRONTEND_DIR.exists():
 @app.on_event("startup")
 def _on_startup() -> None:
     start_monitor(interval_seconds=1.0)
-    import threading
-    from backend.vault.rerank import preload_reranker
-    threading.Thread(target=preload_reranker, daemon=True).start()
 
 
 @app.on_event("shutdown")
@@ -921,18 +918,14 @@ def shield_status():
 
 
 @app.post("/shield/lockdown")
-def shield_lockdown():
-    result = enable_firewall_lockdown()
-    if not result.get("success"):
-        raise HTTPException(status_code=403, detail=result.get("error"))
+def shield_lockdown(elevate: bool = False):
+    result = enable_firewall_lockdown(elevate=elevate)
     return result
 
 
 @app.post("/shield/unlock")
-def shield_unlock():
-    result = disable_firewall_lockdown()
-    if not result.get("success"):
-        raise HTTPException(status_code=500, detail=result.get("error", "Unknown error disabling lockdown."))
+def shield_unlock(elevate: bool = False):
+    result = disable_firewall_lockdown(elevate=elevate)
     return result
 
 
