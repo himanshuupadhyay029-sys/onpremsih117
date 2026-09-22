@@ -2,11 +2,10 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import MessageTurn from './MessageTurn';
 
 const GREETINGS = [
-  "Where should we begin?",
-  "Ready when you are.",
-  "What's the task at hand?",
-  "SOPs, a calculation, or a report?",
-  "How can I help, Operator?",
+  "What can I help with today?",
+  "What would you like to solve?",
+  "How can I assist you today?",
+  "Ready for your next task.",
 ];
 
 const SUGGESTION_CHIPS = [
@@ -968,7 +967,7 @@ export default function NewTaskScreen({
             ref={textareaRef}
             id="task-input"
             rows={1}
-            placeholder="Ask about an SOP, run a calculation, or draft a report…"
+            placeholder="Message Kavach…"
             value={taskInput}
             onChange={handleInputChange}
             onKeyDown={handleKeyDown}
@@ -1057,6 +1056,10 @@ export default function NewTaskScreen({
               </svg>
             </button>
           </div>
+        </div>
+
+        <div className="composer-disclaimer">
+          Kavach is an air-gapped sovereign AI. Verify critical operational outputs.
         </div>
       </div>
     </section>
