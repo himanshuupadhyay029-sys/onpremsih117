@@ -149,7 +149,7 @@ export default function NewTaskScreen({
   // Auto-scroll to bottom of thread
   useEffect(() => {
     if (chatBottomRef.current) {
-      chatBottomRef.current.scrollIntoView({ behavior: 'smooth' });
+      chatBottomRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
     }
   }, [messages, running]);
 
