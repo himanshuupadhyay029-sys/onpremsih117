@@ -2,5 +2,6 @@
   "reasoning": "gemma3:4b",
   "code": "granite4.1:3b",
   "vision": "gemma3:4b",
-  "embedding": "nomic-embed-text:latest"
+  "embedding": "nomic-embed-text:latest",
+  "rerank": "gemma3:4b"
 }

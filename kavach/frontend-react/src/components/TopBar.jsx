@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
+import LockdownModal from './LockdownModal';
 
 export default function TopBar({ sidebarCollapsed, onToggleSidebar }) {
   const [externalCount, setExternalCount] = useState(null);
   const [monitorStatus, setMonitorStatus] = useState('Connecting to monitor…');
   const [lockdownOn, setLockdownOn] = useState(false);
   const [isLocking, setIsLocking] = useState(false);
+  const [lockdownModalOpen, setLockdownModalOpen] = useState(false);
   const [inlineNote, setInlineNote] = useState('');
   const noteTimerRef = useRef(null);
 
@@ -70,25 +72,64 @@ export default function TopBar({ sidebarCollapsed, onToggleSidebar }) {
 
   // 3. Toggle firewall lockdown
   const handleToggleLockdown = async () => {
-    const endpoint = lockdownOn ? '/shield/unlock' : '/shield/lockdown';
+    if (lockdownOn) {
+      // Unlocking
+      setIsLocking(true);
+      try {
+        const response = await fetch('/shield/unlock?elevate=true', { method: 'POST' });
+        const data = await response.json().catch(() => ({}));
+        if (data.success !== false) {
+          setLockdownOn(false);
+          showNote('Hardware Firewall Lockdown disabled. Outbound internet restored.');
+        } else {
+          showNote(`Could not disable lockdown: ${data.error || response.statusText}`);
+        }
+      } catch (err) {
+        showNote(`Could not reach shield endpoint: ${err.message}`);
+      } finally {
+        setIsLocking(false);
+      }
+      return;
+    }
+
+    // Attempt standard lockdown or check if elevation permission is needed
     setIsLocking(true);
     try {
-      const response = await fetch(endpoint, { method: 'POST' });
-      if (!response.ok) {
-        const body = await response.json().catch(() => ({}));
-        const detail = String(body.detail || '');
-        showNote(
-          detail.includes('elevated') || response.status === 403
-            ? 'Requires starting the server as Administrator.'
-            : `Could not change lockdown: ${detail || response.statusText}`
-        );
+      const response = await fetch('/shield/lockdown', { method: 'POST' });
+      const data = await response.json().catch(() => ({}));
+      if (data.requires_permission) {
+        // Show interactive security permission modal
+        setLockdownModalOpen(true);
+      } else if (data.success || data.active) {
+        setLockdownOn(true);
+        showNote('Hardware Firewall Lockdown active.');
       } else {
-        setLockdownOn(!lockdownOn);
+        showNote(`Lockdown failed: ${data.error || response.statusText}`);
       }
     } catch (err) {
-      showNote(`Could not reach the shield endpoint: ${err.message}`);
+      showNote(`Could not reach shield endpoint: ${err.message}`);
     } finally {
       setIsLocking(false);
+    }
+  };
+
+  // 4. Called when user clicks "Grant Permission & Engage" inside LockdownModal
+  const handleConfirmElevate = async () => {
+    try {
+      const response = await fetch('/shield/lockdown?elevate=true', { method: 'POST' });
+      const data = await response.json().catch(() => ({}));
+      if (data.success && data.active) {
+        setLockdownOn(true);
+        showNote('Hardware Firewall Lockdown successfully engaged.');
+        return { success: true };
+      } else {
+        return {
+          success: false,
+          error: data.error || 'Administrator elevation was not completed.',
+        };
+      }
+    } catch (err) {
+      return { success: false, error: err.message };
     }
   };
 
@@ -126,6 +167,7 @@ export default function TopBar({ sidebarCollapsed, onToggleSidebar }) {
           className={`lock-toggle ${lockdownOn ? 'is-on' : ''}`}
           onClick={handleToggleLockdown}
           disabled={isLocking}
+          title={lockdownOn ? 'Lockdown active (Hardware Firewall Default-Deny)' : 'Click to enable Hardware Firewall Lockdown'}
         >
           <svg className="icon icon-sm" viewBox="0 0 24 24">
             <rect x="5" y="11" width="14" height="9" rx="2" />
@@ -135,7 +177,7 @@ export default function TopBar({ sidebarCollapsed, onToggleSidebar }) {
             {isLocking
               ? lockdownOn
                 ? 'Unlocking…'
-                : 'Locking down…'
+                : 'Checking…'
               : lockdownOn
               ? 'Lockdown on'
               : 'Lockdown off'}
@@ -144,6 +186,12 @@ export default function TopBar({ sidebarCollapsed, onToggleSidebar }) {
       </div>
 
       {inlineNote && <div className="inline-note">{inlineNote}</div>}
+
+      <LockdownModal
+        isOpen={lockdownModalOpen}
+        onClose={() => setLockdownModalOpen(false)}
+        onConfirmLockdown={handleConfirmElevate}
+      />
     </header>
   );
 }

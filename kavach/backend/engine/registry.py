@@ -52,6 +52,9 @@ def get_model(role: str) -> str:
     elif role == "vision":
         visions = [m for m in installed if "vl" in m.lower() or "vision" in m.lower() or "moondream" in m.lower() or "llava" in m.lower() or "gemma" in m.lower()]
         return visions[0] if visions else installed[0]
+    elif role == "rerank":
+        rerankers = [m for m in installed if "gemma" in m.lower() or "instruct" in m.lower() or "chat" in m.lower()]
+        return rerankers[0] if rerankers else installed[0]
 
     return installed[0]
 
