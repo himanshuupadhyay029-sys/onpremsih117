@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import MessageTurn from './MessageTurn';
 
 const GREETINGS = [
@@ -93,6 +93,12 @@ export default function NewTaskScreen({
   const [taskInput, setTaskInput] = useState('');
   const [attachedFile, setAttachedFile] = useState(null);
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
+  const [taggedVaultFiles, setTaggedVaultFiles] = useState([]);
+  const [vaultDocs, setVaultDocs] = useState([]);
+  const [loadingVaultDocs, setLoadingVaultDocs] = useState(false);
+  const [showMentionPopover, setShowMentionPopover] = useState(false);
+  const [mentionFilter, setMentionFilter] = useState('');
+  const [mentionSelectedIndex, setMentionSelectedIndex] = useState(0);
   const [greeting] = useState(() => GREETINGS[Math.floor(Math.random() * GREETINGS.length)]);
 
   // Unified conversation turns
@@ -103,11 +109,101 @@ export default function NewTaskScreen({
   const textareaRef = useRef(null);
   const fileInputRef = useRef(null);
   const chatBottomRef = useRef(null);
+  const popoverRef = useRef(null);
   const pollTimerRef = useRef(null);
   const tickerRef = useRef(null);
   const startTimeRef = useRef(0);
 
   const lastLoadedChatIdRef = useRef(undefined);
+
+  // Fetch Knowledge Vault document list for @ mention autocomplete
+  const fetchVaultDocs = useCallback(async () => {
+    try {
+      setLoadingVaultDocs(true);
+      const res = await fetch('/knowledge/list', { credentials: 'include' });
+      if (res.ok) {
+        const data = await res.json();
+        setVaultDocs(data.documents || []);
+      }
+    } catch (err) {
+      console.error('Failed to load knowledge vault documents:', err);
+    } finally {
+      setLoadingVaultDocs(false);
+    }
+  }, []);
+
+  // Pre-load vault documents when user or active screen is ready
+  useEffect(() => {
+    fetchVaultDocs();
+  }, [user?.id, fetchVaultDocs]);
+
+  // Click outside to dismiss mention popover
+  useEffect(() => {
+    const handleGlobalClick = (e) => {
+      if (
+        popoverRef.current &&
+        !popoverRef.current.contains(e.target) &&
+        textareaRef.current &&
+        !textareaRef.current.contains(e.target) &&
+        !e.target.closest('#mention-btn')
+      ) {
+        setShowMentionPopover(false);
+      }
+    };
+    document.addEventListener('mousedown', handleGlobalClick);
+    return () => document.removeEventListener('mousedown', handleGlobalClick);
+  }, []);
+
+  // Filtered vault docs based on what operator typed after '@'
+  const filteredVaultDocs = useMemo(() => {
+    if (!mentionFilter) return vaultDocs;
+    const q = mentionFilter.toLowerCase().trim();
+    return vaultDocs.filter((d) => d.filename.toLowerCase().includes(q));
+  }, [vaultDocs, mentionFilter]);
+
+  // Select a vault document from the @-mention popover
+  const selectVaultDoc = (filename) => {
+    if (!filename) return;
+    if (!taggedVaultFiles.includes(filename)) {
+      setTaggedVaultFiles((prev) => [...prev, filename]);
+    }
+    // Cleanly erase the trailing '@query' from task input text
+    if (textareaRef.current) {
+      const pos = textareaRef.current.selectionStart || taskInput.length;
+      const before = taskInput.slice(0, pos);
+      const after = taskInput.slice(pos);
+      const atIdx = before.lastIndexOf('@');
+      if (atIdx !== -1) {
+        const cleaned = before.slice(0, atIdx) + after;
+        setTaskInput(cleaned);
+        setTimeout(() => {
+          if (textareaRef.current) {
+            textareaRef.current.focus();
+            textareaRef.current.setSelectionRange(atIdx, atIdx);
+            textareaRef.current.style.height = 'auto';
+            textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 220)}px`;
+          }
+        }, 0);
+      }
+    }
+    setShowMentionPopover(false);
+    setMentionFilter('');
+    setMentionSelectedIndex(0);
+  };
+
+  const handleToggleMention = () => {
+    if (showMentionPopover) {
+      setShowMentionPopover(false);
+    } else {
+      fetchVaultDocs();
+      setShowMentionPopover(true);
+      setMentionFilter('');
+      setMentionSelectedIndex(0);
+      if (textareaRef.current) {
+        textareaRef.current.focus();
+      }
+    }
+  };
 
   // Load chat messages when activeChatId changes
   useEffect(() => {
@@ -122,6 +218,7 @@ export default function NewTaskScreen({
     setMessages([]);
     setTaskInput('');
     setAttachedFile(null);
+    setTaggedVaultFiles([]);
     setApprovalOutcome({});
 
     if (!activeChatId) {
@@ -168,10 +265,60 @@ export default function NewTaskScreen({
   };
 
   const handleInputChange = (e) => {
-    setTaskInput(e.target.value);
+    const val = e.target.value;
+    const cursorPos = e.target.selectionStart;
+    setTaskInput(val);
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
       textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 220)}px`;
+    }
+
+    // Inspect if user typed '@' or is typing a mention filter query
+    const textBeforeCursor = val.slice(0, cursorPos);
+    const atMatch = textBeforeCursor.match(/@([a-zA-Z0-9_\-.]*)$/);
+    if (atMatch) {
+      setMentionFilter(atMatch[1] || '');
+      setShowMentionPopover(true);
+      setMentionSelectedIndex(0);
+      if (vaultDocs.length === 0) {
+        fetchVaultDocs();
+      }
+    } else {
+      setShowMentionPopover(false);
+    }
+  };
+
+  const handleKeyDown = (e) => {
+    if (showMentionPopover) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setMentionSelectedIndex((prev) => (prev + 1) % (filteredVaultDocs.length || 1));
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setMentionSelectedIndex((prev) => (prev - 1 + (filteredVaultDocs.length || 1)) % (filteredVaultDocs.length || 1));
+        return;
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        if (filteredVaultDocs.length > 0) {
+          e.preventDefault();
+          selectVaultDoc(filteredVaultDocs[mentionSelectedIndex]?.filename);
+          return;
+        }
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setShowMentionPopover(false);
+        return;
+      }
+    }
+
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      if ((taskInput.trim() || attachedFile || taggedVaultFiles.length > 0) && !running) {
+        runTask();
+      }
     }
   };
 
@@ -313,7 +460,12 @@ export default function NewTaskScreen({
       role: 'user',
       content: task,
       created_at: new Date().toISOString(),
-      meta: { attachment_type: attachedFile ? 'file' : null, task_id: taskId },
+      meta: {
+        attachment_type: attachedFile ? 'file' : null,
+        vault_files: taggedVaultFiles.length > 0 ? [...taggedVaultFiles] : null,
+        task_id: taskId,
+      },
+      vault_files: taggedVaultFiles.length > 0 ? [...taggedVaultFiles] : null,
     };
 
     const asstTurn = {
@@ -339,6 +491,7 @@ export default function NewTaskScreen({
     // Optimistically append user message and streaming assistant turn immediately
     setMessages((prev) => [...prev, userTurn, asstTurn]);
     setTaskInput('');
+    setTaggedVaultFiles([]);
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
 
     setRunning(true);
@@ -355,7 +508,12 @@ export default function NewTaskScreen({
       );
     }, 1000);
 
-    const streamUrl = `/run/stream?task=${encodeURIComponent(fullTask)}&task_id=${encodeURIComponent(taskId)}${activeChatId ? `&chat_id=${encodeURIComponent(activeChatId)}` : ''}${attachedFile ? `&attachment_type=file` : ''}`;
+    let streamUrl = `/run/stream?task=${encodeURIComponent(fullTask)}&task_id=${encodeURIComponent(taskId)}${activeChatId ? `&chat_id=${encodeURIComponent(activeChatId)}` : ''}${attachedFile ? `&attachment_type=file` : ''}`;
+    if (taggedVaultFiles.length > 0) {
+      taggedVaultFiles.forEach((vf) => {
+        streamUrl += `&vault_files=${encodeURIComponent(vf)}`;
+      });
+    }
     const eventSource = new EventSource(streamUrl);
 
     eventSource.addEventListener('plan', (e) => {
@@ -637,13 +795,6 @@ export default function NewTaskScreen({
     }
   };
 
-  const handleKeyDown = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      if (taskInput.trim() && !running) runTask();
-    }
-  };
-
   // Human approval handlers
   const handleApprovalAction = async (taskId, decision) => {
     setApprovalOutcome((prev) => ({
@@ -786,35 +937,110 @@ export default function NewTaskScreen({
 
       {/* Pinned Bottom Input Area (Never moves, pinned to bottom of viewport) */}
       <div className="chat-composer-fixed" id="chat-composer-fixed">
-        <div className="composer">
+        <div className="composer" style={{ position: 'relative' }}>
+          {/* Mention Popover Floating Dropdown */}
+          {showMentionPopover && (
+            <div className="mention-popover" ref={popoverRef} id="mention-popover">
+              <div className="mention-popover-header">
+                <svg className="icon icon-sm" viewBox="0 0 24 24">
+                  <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+                  <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+                </svg>
+                <span>Knowledge Vault Documents</span>
+                <span className="mention-hint-key">↑↓ to navigate · ↵ to select</span>
+              </div>
+              <div className="mention-popover-list">
+                {loadingVaultDocs && (
+                  <div className="mention-popover-empty">Loading vault documents…</div>
+                )}
+                {!loadingVaultDocs && filteredVaultDocs.length === 0 && (
+                  <div className="mention-popover-empty">
+                    {vaultDocs.length === 0
+                      ? 'No documents in Knowledge Vault yet.'
+                      : `No vault files matching "${mentionFilter}"`}
+                  </div>
+                )}
+                {!loadingVaultDocs &&
+                  filteredVaultDocs.map((doc, idx) => (
+                    <div
+                      key={doc.filename}
+                      className={`mention-item ${idx === mentionSelectedIndex ? 'is-selected' : ''}`}
+                      onMouseEnter={() => setMentionSelectedIndex(idx)}
+                      onClick={() => selectVaultDoc(doc.filename)}
+                    >
+                      <div className="mention-item-icon">
+                        <svg className="icon icon-sm" viewBox="0 0 24 24">
+                          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                          <polyline points="14 2 14 8 20 8" />
+                          <line x1="16" y1="13" x2="8" y2="13" />
+                          <line x1="16" y1="17" x2="8" y2="17" />
+                        </svg>
+                      </div>
+                      <div className="mention-item-info">
+                        <span className="mention-item-title">{doc.filename}</span>
+                      </div>
+                      <span className="mention-item-chunks">
+                        {doc.chunk_count} chunk{doc.chunk_count === 1 ? '' : 's'}
+                      </span>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          )}
+
+          {/* Attached Knowledge Vault Chips & File Attachments */}
+          {(taggedVaultFiles.length > 0 || attachedFile) && (
+            <div className="composer-attachments-row" id="composer-attachments-row">
+              {taggedVaultFiles.map((filename) => (
+                <div key={filename} className="vault-chip" title="Knowledge Vault Document Reference">
+                  <svg className="icon icon-sm" viewBox="0 0 24 24">
+                    <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+                    <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+                  </svg>
+                  <span className="vault-chip-name">{filename}</span>
+                  <button
+                    type="button"
+                    className="vault-chip-remove"
+                    onClick={() => setTaggedVaultFiles((prev) => prev.filter((f) => f !== filename))}
+                    title="Remove vault document"
+                  >
+                    <svg className="icon icon-sm" viewBox="0 0 24 24">
+                      <path d="M6 6l12 12M18 6L6 18" />
+                    </svg>
+                  </button>
+                </div>
+              ))}
+
+              {attachedFile && (
+                <div className="attachment" id="attachment">
+                  <svg className="icon icon-sm" viewBox="0 0 24 24">
+                    <path d="M14 4l-7.5 7.5a3 3 0 004.2 4.2L18 8.5" />
+                  </svg>
+                  <span id="attachment-name">{attachedFile.name}</span>
+                  <button
+                    id="attachment-clear"
+                    onClick={() => setAttachedFile(null)}
+                    title="Remove attachment"
+                  >
+                    <svg className="icon icon-sm" viewBox="0 0 24 24">
+                      <path d="M6 6l12 12M18 6L6 18" />
+                    </svg>
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
           <textarea
             ref={textareaRef}
             id="task-input"
             rows={1}
-            placeholder="Ask about an SOP, run a calculation, or draft a report…"
+            placeholder="Ask about an SOP, reference @file, run a calculation, or draft a report…"
             value={taskInput}
             onChange={handleInputChange}
             onKeyDown={handleKeyDown}
             disabled={running}
           />
-
-          {attachedFile && (
-            <div className="attachment" id="attachment">
-              <svg className="icon icon-sm" viewBox="0 0 24 24">
-                <path d="M14 4l-7.5 7.5a3 3 0 004.2 4.2L18 8.5" />
-              </svg>
-              <span id="attachment-name">{attachedFile.name}</span>
-              <button
-                id="attachment-clear"
-                onClick={() => setAttachedFile(null)}
-                title="Remove attachment"
-              >
-                <svg className="icon icon-sm" viewBox="0 0 24 24">
-                  <path d="M6 6l12 12M18 6L6 18" />
-                </svg>
-              </button>
-            </div>
-          )}
 
           <div className="composer-bar">
             <button
@@ -822,7 +1048,7 @@ export default function NewTaskScreen({
               id="attach-btn"
               onClick={() => fileInputRef.current?.click()}
               disabled={running || uploadingAttachment}
-              title="Attach a file"
+              title="Attach a local file"
             >
               <svg className="icon" viewBox="0 0 24 24">
                 <path d="M12 5v14M5 12h14" />
@@ -836,13 +1062,26 @@ export default function NewTaskScreen({
               hidden
             />
 
+            <button
+              className={`composer-mention-btn ${showMentionPopover || taggedVaultFiles.length > 0 ? 'is-active' : ''}`}
+              id="mention-btn"
+              onClick={handleToggleMention}
+              disabled={running}
+              title="Reference a Knowledge Vault document (@)"
+            >
+              <svg className="icon" viewBox="0 0 24 24">
+                <circle cx="12" cy="12" r="4" />
+                <path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-3.92 7.94" />
+              </svg>
+            </button>
+
             <div className="composer-spacer" />
 
             <button
               className="send-btn"
               id="send-btn"
               onClick={() => runTask()}
-              disabled={!taskInput.trim() || running}
+              disabled={(!taskInput.trim() && !attachedFile && taggedVaultFiles.length === 0) || running}
               title="Run task"
             >
               <svg className="icon" viewBox="0 0 24 24">

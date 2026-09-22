@@ -199,10 +199,12 @@ export default function MessageTurn({
     const userText = turn.content && turn.content.includes("\n\nAttached file:")
       ? turn.content.split("\n\nAttached file:")[0]
       : turn.content;
+    const vaultFiles = turn.vault_files || meta.vault_files || [];
 
     return (
       <div className="chat-msg-row chat-msg-row-user" id={`turn-${turn.id}`}>
         <div className="chat-msg chat-msg-user">
+          {/* Standard Attached File */}
           {attachedFileName && (
             <div className="chat-user-attachment">
               <svg className="icon icon-sm" viewBox="0 0 24 24">
@@ -211,6 +213,22 @@ export default function MessageTurn({
               <span>{attachedFileName}</span>
             </div>
           )}
+
+          {/* Tagged Knowledge Vault Documents */}
+          {Array.isArray(vaultFiles) && vaultFiles.length > 0 && (
+            <div className="chat-user-vault-tags">
+              {vaultFiles.map((vf) => (
+                <div key={vf} className="chat-user-vault-chip" title="Knowledge Vault Document">
+                  <svg className="icon icon-sm" viewBox="0 0 24 24">
+                    <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+                    <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+                  </svg>
+                  <span>{vf}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
           <div className="chat-msg-content">{userText}</div>
         </div>
       </div>

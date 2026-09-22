@@ -68,6 +68,8 @@ class AgentState(TypedDict):
     history_context: Optional[str]
     shared_memory: str
     attachment_type: Optional[str]
+    vault_files: NotRequired[Optional[List[str]]]
+    user_id: NotRequired[Optional[str]]
 
     observe_decision: NotRequired[Optional[Dict[str, Any]]]
     clarify_question: NotRequired[Optional[str]]

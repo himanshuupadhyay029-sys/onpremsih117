@@ -155,7 +155,12 @@ def dispatch_tool(
 
     elif tool == "search":
         actor = "vault_search"
-        result = search_tool(step_input, task_id=state.get("task_id"))
+        result = search_tool(
+            step_input,
+            task_id=state.get("task_id"),
+            user_id=state.get("user_id"),
+            target_files=state.get("vault_files"),
+        )
         answer = result["answer"]
         sources = result.get("sources", [])
         is_grounded_flag = result.get("grounded", True)

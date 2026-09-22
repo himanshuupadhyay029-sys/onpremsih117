@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 import uuid
-from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -100,6 +100,7 @@ _AGENT_RUNS_CACHE: Dict[str, Dict[str, Any]] = {}
 class RunRequest(BaseModel):
     task: str
     attachment_type: Optional[str] = None
+    vault_files: Optional[List[str]] = None
     task_id: Optional[str] = None
     chat_id: Optional[str] = None
     history: Optional[List[Dict[str, Any]]] = None
@@ -163,7 +164,7 @@ def run(
                 chat_id=chat.id,
                 role="user",
                 content=req.task,
-                meta={"attachment_type": req.attachment_type, "task_id": req.task_id},
+                meta={"attachment_type": req.attachment_type, "vault_files": req.vault_files, "task_id": req.task_id},
             )
             db.add(user_msg)
             chat.updated_at = func.now()
@@ -206,6 +207,7 @@ def run(
         history=history,
         initial_key_facts=initial_key_facts,
         user_id=user_id_str,
+        vault_files=req.vault_files,
     )
 
 
@@ -291,12 +293,26 @@ async def run_stream(
     task_id: Optional[str] = None,
     chat_id: Optional[str] = None,
     attachment_type: Optional[str] = None,
+    vault_files: Optional[List[str]] = Query(None),
     current_user: Optional[User] = Depends(get_optional_user),
     db: Session = Depends(get_db),
 ):
     """Real-time SSE streaming endpoint for KAVACH autonomous agent execution."""
     if not task_id:
         task_id = str(uuid.uuid4())
+
+    parsed_vault_files: List[str] = []
+    if vault_files:
+        for vf in vault_files:
+            if isinstance(vf, str) and vf.startswith("[") and vf.endswith("]"):
+                try:
+                    parsed_vault_files.extend(json.loads(vf))
+                except Exception:
+                    parsed_vault_files.append(vf)
+            elif isinstance(vf, str) and "," in vf:
+                parsed_vault_files.extend([item.strip() for item in vf.split(",") if item.strip()])
+            elif vf:
+                parsed_vault_files.append(vf)
 
     log_gateway("POST /run/stream", task_id, f"Task: '{_truncate(task, 65)}'")
     loop = asyncio.get_running_loop()
@@ -325,7 +341,11 @@ async def run_stream(
                 chat_id=chat.id,
                 role="user",
                 content=task,
-                meta={"attachment_type": attachment_type, "task_id": task_id},
+                meta={
+                    "attachment_type": attachment_type,
+                    "vault_files": parsed_vault_files or None,
+                    "task_id": task_id,
+                },
             )
             db.add(user_msg)
             chat.updated_at = func.now()
@@ -358,6 +378,7 @@ async def run_stream(
                 history=history,
                 initial_key_facts=initial_key_facts,
                 user_id=user_id_str,
+                vault_files=parsed_vault_files or None,
             )
 
             if chat_db_id:

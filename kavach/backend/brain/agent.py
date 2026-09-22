@@ -62,13 +62,14 @@ MAX_HISTORY_TURNS = 12
 MAX_HISTORY_CHARS_PER_MSG = 1200
 
 
-def _get_vault_document_names() -> List[str]:
-    """Dynamically reads the list of all currently indexed documents in the vault."""
-    from backend.vault.ingest import METADATA_PATH
-    if not METADATA_PATH.exists():
-        return []
+def _get_vault_document_names(user_id: Optional[str] = None) -> List[str]:
+    """Dynamically reads the list of all currently indexed documents in the vault for the user."""
+    from backend.vault.ingest import get_user_paths
     try:
-        with open(METADATA_PATH, "r", encoding="utf-8") as f:
+        _, _, _, metadata_path, _ = get_user_paths(user_id)
+        if not metadata_path.exists():
+            return []
+        with open(metadata_path, "r", encoding="utf-8") as f:
             meta = json.load(f)
         return sorted({entry.get("source_filename") for entry in meta if entry.get("source_filename")})
     except Exception:
@@ -311,6 +312,7 @@ def _parse_master_plan(
     raw: str,
     original_task: str,
     attachment_type: Optional[str] = None,
+    vault_files: Optional[List[str]] = None,
 ) -> List[dict]:
     """Robustly parses the master planner's JSON output into ordered PlanSteps."""
     text = (raw or "").strip()
@@ -448,15 +450,27 @@ def _parse_master_plan(
                     "input": f"Draft formal document for: {original_task}",
                     "status": "pending",
                 })
-        elif has_code_intent and has_doc_intent:
-            parsed_steps = [
-                {"step_num": 1, "tool": "code", "input": original_task, "status": "pending"},
-                {"step_num": 2, "tool": "document", "input": f"Draft formal document for: {original_task}", "status": "pending"},
-            ]
-        elif any(w in task_lower for w in ["ocr", "scan", "scanned"]):
-            fallback_tool = "ocr"
+        task_lower = original_task.lower()
+        has_code_intent = (
+            any(w in task_lower for w in ["write a python script", "run code", "execute script", "python script to", "write code", "run python", "execute python", "generate code"])
+            or ("code" in task_lower and any(w in task_lower for w in ["write", "run", "script", "generate"]))
+        )
+        has_doc_intent = (
+            any(w in task_lower for w in ["draft a report", "formal report", "write a document", "generate report", "incident report", "briefing document", "policy memo"])
+            or ("report" in task_lower and any(w in task_lower for w in ["draft", "write", "create", "generate"]))
+        )
+        has_excel_intent = any(w in task_lower for w in ["spreadsheet", "excel", "xlsx", "sheet with formula", "create sheet", "generate excel", "cost sheet", "log sheet", "balance sheet", "table in excel", "create spreadsheet", "generate spreadsheet"])
+        has_ppt_intent = any(w in task_lower for w in ["presentation", "slide deck", "powerpoint", "pptx", "briefing deck", "create ppt", "generate ppt", "create slides", "make slides"]) or bool(re.search(r"\b\d+-slide\b|\bslides\b", task_lower))
+
+        if has_ppt_intent:
+            fallback_tool = "ppt"
             parsed_steps = [{"step_num": 1, "tool": fallback_tool, "input": original_task, "status": "pending"}]
-        elif has_img_intent:
+        elif has_excel_intent:
+            fallback_tool = "excel"
+            parsed_steps = [{"step_num": 1, "tool": fallback_tool, "input": original_task, "status": "pending"}]
+        elif any(ext in task_lower for ext in [".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".webp"]) or (
+            attachment_type and attachment_type.lower() in ("image", "photo", "picture", "file")
+        ):
             fallback_tool = "vision"
             parsed_steps = [{"step_num": 1, "tool": fallback_tool, "input": original_task, "status": "pending"}]
         elif has_code_intent:
@@ -468,8 +482,8 @@ def _parse_master_plan(
         elif has_doc_intent:
             fallback_tool = "document"
             parsed_steps = [{"step_num": 1, "tool": fallback_tool, "input": original_task, "status": "pending"}]
-        # Dynamic check: Does the request mention any active document indexed in the Knowledge Vault?
-        if _matches_vault_document(task_lower) or any(w in task_lower for w in [
+        # Dynamic check: Does the request mention any active document indexed in the Knowledge Vault or have vault files attached?
+        elif vault_files or _matches_vault_document(task_lower) or any(w in task_lower for w in [
             "search", "sop", "procedure", "guideline", "standard operating procedure",
             "knowledge vault", "uploaded document", "uploaded file", "context document",
             "policy document", "manual", "handbook", "datasheet", "specification",
@@ -518,9 +532,8 @@ def master_plan_node(state: AgentState) -> dict:
             "content": f"Resuming execution of existing plan from Step {current_idx + 1} with operator clarification.",
         }
         return {
-            "plan": updated_plan,
             "status": "executing",
-            "clarify_question": None,
+            "plan": updated_plan,
             "trace": [thought],
         }
 
@@ -534,8 +547,15 @@ def master_plan_node(state: AgentState) -> dict:
     if state.get("attachment_type"):
         attachment_info = f"Attachment present (type: {state['attachment_type']})\n"
 
-    vault_docs = _get_vault_document_names()
-    if vault_docs:
+    vault_docs = _get_vault_document_names(user_id=state.get("user_id"))
+    tagged_vault = state.get("vault_files") or []
+    if tagged_vault:
+        tagged_str = "\n".join(f"- {d} (User explicitly @-tagged this file for knowledge retrieval)" for d in tagged_vault)
+        vault_section = f"Explicitly Targeted Knowledge Vault Documents:\n{tagged_str}\n\n"
+        if vault_docs:
+            docs_list_str = "\n".join(f"- {d}" for d in vault_docs)
+            vault_section += f"Other Available Knowledge Vault Documents:\n{docs_list_str}\n"
+    elif vault_docs:
         docs_list_str = "\n".join(f"- {d}" for d in vault_docs)
         vault_section = f"Available Knowledge Vault Documents (Live Index):\n{docs_list_str}\n"
     else:
@@ -566,6 +586,7 @@ def master_plan_node(state: AgentState) -> dict:
         raw,
         original_task=state["original_task"],
         attachment_type=state.get("attachment_type"),
+        vault_files=state.get("vault_files"),
     )
 
     elapsed = time.perf_counter() - t_start
@@ -623,6 +644,7 @@ def route_subtask_node(state: AgentState) -> dict:
         attachment_type=state.get("attachment_type"),
         hint=step.get("tool"),
         context=state.get("shared_memory"),
+        vault_files=state.get("vault_files"),
     )
 
     # Align subtask tool with the routed intent
@@ -1473,6 +1495,7 @@ def run_agent(
     initial_key_facts: Optional[Dict[str, Any]] = None,
     resume_state: Optional[AgentState] = None,
     user_id: Optional[str] = None,
+    vault_files: Optional[List[str]] = None,
 ) -> dict:
     if user_id:
         set_current_user_id(user_id)
@@ -1504,6 +1527,8 @@ def run_agent(
             "task_id": task_id,
             "original_task": task,
             "attachment_type": attachment_type,
+            "vault_files": vault_files,
+            "user_id": user_id,
             "routing_decision": None,
             "plan": [],
             "current_step": 0,

@@ -214,6 +214,7 @@ def retrieve(
     final_k: int = DEFAULT_FINAL_K,
     rerank_threshold: float = 0.35,
     user_id: Optional[str] = None,
+    target_files: Optional[List[str]] = None,
 ) -> List[Dict]:
     """Executes the full hybrid retrieval pipeline:
 
@@ -228,20 +229,44 @@ def retrieve(
     if index is None or index.ntotal == 0 or not metadata:
         return []
 
+    # Optional target document filtering
+    target_set: Optional[Set[str]] = None
+    if target_files:
+        target_set = {f.lower().strip() for f in target_files if isinstance(f, str) and f.strip()}
 
     # 1. Dense Vector Search (FAISS)
     embed_model = registry.get_model("embedding")
     query_vec = np.array(ollama.embed(embed_model, query), dtype="float32")
 
-    search_k = min(candidate_k, index.ntotal)
+    # If target filter is active, expand search_k to ensure we find matching document chunks
+    search_k = min(index.ntotal, max(candidate_k * 4, 100) if target_set else candidate_k)
     distances, indices = index.search(np.array([query_vec]), search_k)
-    dense_ranked_indices = [int(idx) for idx in indices[0] if idx != -1]
+    raw_dense_indices = [int(idx) for idx in indices[0] if idx != -1]
+
+    if target_set:
+        dense_ranked_indices = [
+            idx for idx in raw_dense_indices
+            if idx < len(metadata) and metadata[idx].get("source_filename", "").lower() in target_set
+        ][:candidate_k]
+        # Fallback to all if none matched exact filter
+        if not dense_ranked_indices:
+            dense_ranked_indices = raw_dense_indices[:candidate_k]
+    else:
+        dense_ranked_indices = raw_dense_indices[:candidate_k]
 
     # 2. Sparse Lexical Search (BM25)
     sparse_ranked_indices: List[int] = []
     if bm25 is not None:
-        bm25_hits = bm25.score(query, top_k=candidate_k)
-        sparse_ranked_indices = [doc_id for doc_id, _ in bm25_hits]
+        bm25_hits = bm25.score(query, top_k=search_k if target_set else candidate_k)
+        if target_set:
+            sparse_ranked_indices = [
+                doc_id for doc_id, _ in bm25_hits
+                if doc_id < len(metadata) and metadata[doc_id].get("source_filename", "").lower() in target_set
+            ][:candidate_k]
+            if not sparse_ranked_indices:
+                sparse_ranked_indices = [doc_id for doc_id, _ in bm25_hits][:candidate_k]
+        else:
+            sparse_ranked_indices = [doc_id for doc_id, _ in bm25_hits]
 
     # 3. Reciprocal Rank Fusion
     fused_candidates = _reciprocal_rank_fusion(
@@ -257,6 +282,15 @@ def retrieve(
         metadata,
         top_n=candidate_k,
     )
+
+    # Filter expanded candidates if target_set provided
+    if target_set:
+        filtered_expanded = [
+            c for c in expanded_candidates
+            if c.get("source_filename", "").lower() in target_set
+        ]
+        if filtered_expanded:
+            expanded_candidates = filtered_expanded
 
     # 5. Neural Cross-Encoder Reranking
     reranked_candidates = cross_encoder_rerank(

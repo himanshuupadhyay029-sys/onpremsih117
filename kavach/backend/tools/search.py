@@ -65,10 +65,15 @@ def _check_is_grounded(answer: str) -> bool:
     return not any(indicator in ans_lower for indicator in UNGROUNDED_INDICATORS)
 
 
-def search(query: str, task_id: Optional[str] = None, user_id: Optional[str] = None) -> Dict:
+def search(
+    query: str,
+    task_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+    target_files: Optional[List[str]] = None,
+) -> Dict:
     t0 = time.perf_counter()
     log_tool("vault", "SEARCH", f"Query: '{_truncate(query, 70)}'")
-    results = retrieve(query, user_id=user_id)
+    results = retrieve(query, user_id=user_id, target_files=target_files)
 
     if not results:
         answer = "I don't have enough information in the knowledge vault to answer this."

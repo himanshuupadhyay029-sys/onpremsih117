@@ -244,9 +244,19 @@ def route(
     attachment_type: Optional[str] = None,
     hint: Optional[str] = None,
     context: Optional[str] = None,
+    vault_files: Optional[List[str]] = None,
 ) -> RoutingDecision:
     """Rule-based router with optional planner hint support. Returns a RoutingDecision."""
     task_lower = (task or "").lower()
+
+    # If vault_files are explicitly attached and no hint/explicit deliverable was set, search is strongly prioritized
+    if vault_files and not hint and not any(w in task_lower for w in ["presentation", "ppt", "slide", "spreadsheet", "excel", "xlsx", "python script", "run code"]):
+        return RoutingDecision(
+            task_type="search",
+            model_role=MODEL_ROLE_BY_TASK_TYPE["search"],
+            tools_needed=TOOLS_BY_TASK_TYPE["search"],
+            reason=f"explicit Knowledge Vault file(s) attached: {vault_files}",
+        )
 
     # If planner explicitly hinted a valid specialized tool, respect the planner's architecture
     normalized_hint = (hint or "").strip().lower()
