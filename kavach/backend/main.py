@@ -35,6 +35,7 @@ from backend.db.session import get_db, SessionLocal
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from backend.guard.approve import get_approval, resolve_approval
+from backend.tools.writer import render_docx
 from backend.terminal_logger import log_gateway, _truncate
 from backend.vault.ingest import METADATA_PATH, SUPPORTED_EXTENSIONS, ingest_document, delete_document
 from backend.shield.firewall import (
@@ -775,8 +776,14 @@ def download_file(filename: str):
     if not file_path.exists() or not file_path.is_file():
         raise HTTPException(status_code=404, detail=f"File '{filename}' not found in outputs.")
 
-    media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-    if filename.endswith(".csv"):
+    media_type = "application/octet-stream"
+    if filename.endswith(".docx"):
+        media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    elif filename.endswith(".xlsx"):
+        media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    elif filename.endswith(".pptx"):
+        media_type = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+    elif filename.endswith(".csv"):
         media_type = "text/csv"
     elif filename.endswith(".json"):
         media_type = "application/json"

@@ -19,9 +19,9 @@ from backend.terminal_logger import log_terminal
 
 logger = logging.getLogger("kavach.router")
 
-TaskType = Literal["document", "code", "calc", "search", "vision", "ocr", "llm"]
+TaskType = Literal["document", "code", "calc", "search", "vision", "ocr", "llm", "excel", "ppt"]
 
-VALID_TASK_TYPES: List[str] = ["document", "code", "calc", "search", "vision", "ocr", "llm"]
+VALID_TASK_TYPES: List[str] = ["document", "code", "calc", "search", "vision", "ocr", "llm", "excel", "ppt"]
 
 # task_type -> which model role in models.json should handle it
 MODEL_ROLE_BY_TASK_TYPE = {
@@ -32,6 +32,8 @@ MODEL_ROLE_BY_TASK_TYPE = {
     "vision": "vision",
     "ocr": "reasoning",
     "llm": "reasoning",
+    "excel": "reasoning",
+    "ppt": "reasoning",
 }
 
 # task_type -> tools this kind of task is expected to need
@@ -43,10 +45,28 @@ TOOLS_BY_TASK_TYPE = {
     "vision": ["vision"],
     "ocr": ["ocr"],
     "llm": ["llm"],
+    "excel": ["excel"],
+    "ppt": ["ppt"],
 }
 
 # Keyword banks used for pure rule-based scoring. Deliberately simple/cheap.
 _KEYWORDS = {
+    "excel": [
+        "excel", "spreadsheet", "xlsx", "csv table", "create sheet", "sheet with formula",
+        "generate excel", "cost sheet", "data sheet with calculation", "table with sum",
+        "financial table", "inventory spreadsheet", "log sheet", "balance sheet",
+        "breakdown sheet", "table in excel", "export to excel", "export to xlsx",
+        "create spreadsheet", "generate spreadsheet", "make an excel", "make a spreadsheet",
+        "columns and rows", "tabular sheet",
+    ],
+    "ppt": [
+        "ppt", "pptx", "powerpoint", "presentation", "slide deck", "slides", "slide",
+        "briefing deck", "pitch deck", "generate presentation", "create slides",
+        "create ppt", "slides on", "deck on", "slides for", "presentation for",
+        "make slides", "export to ppt", "export to pptx", "generate ppt",
+        "slide presentation", "briefing slides", "deck presentation",
+        "executive presentation", "executive briefing",
+    ],
     "code": [
         "code", "python", "function", "script", "program", "debug", "bug",
         "class ", "def ", "algorithm", "javascript", "typescript", "java ",
@@ -172,9 +192,18 @@ def _score_task(task_lower: str) -> dict:
     for cat, keywords in _KEYWORDS.items():
         for kw in keywords:
             if kw in task_lower:
-                scores[cat] += 1
-    if _matches_vault_document(task_lower):
-        scores["search"] += 3  # Strong signal for vault document queries
+                weight = 3 if (" " in kw or len(kw) >= 7) else 1
+                scores[cat] += weight
+
+    has_explicit_deliverable = any(
+        scores[cat] >= 3 for cat in ("excel", "ppt", "code", "document", "calc")
+    )
+
+    if _matches_vault_document(task_lower) and not has_explicit_deliverable:
+        scores["search"] += 3
+    elif _matches_vault_document(task_lower):
+        scores["search"] += 1
+
     return scores
 
 
@@ -183,11 +212,13 @@ def _llm_classify(task: str) -> str:
     model = registry.get_model("reasoning")
     prompt = (
         "Classify the user's task into exactly one category word from this list: "
-        "document, code, calc, search, vision, ocr, llm.\n\n"
+        "document, code, calc, search, vision, ocr, llm, excel, ppt.\n\n"
         "Guidelines:\n"
         "- 'calc': arithmetic, formulas, math verification, numerical word problems (speed, distance, conversions).\n"
         "- 'code': writing or executing Python/JS/C programming scripts.\n"
         "- 'document': drafting formal reports or Word documents.\n"
+        "- 'excel': creating spreadsheets, xlsx workbooks, tabular formulas.\n"
+        "- 'ppt': creating presentation slide decks, pptx briefings.\n"
         "- 'search': looking up SOPs or procedures in the Knowledge Vault.\n"
         "- 'vision': analyzing an image.\n"
         "- 'ocr': extracting text from scanned images.\n"
@@ -249,6 +280,24 @@ def route(
             model_role=MODEL_ROLE_BY_TASK_TYPE[task_type],
             tools_needed=TOOLS_BY_TASK_TYPE[task_type],
             reason=f"{reason_detail} deterministically routes to vision",
+        )
+
+    # Explicit Presentation / Slide Deck creation intent
+    if any(w in task_lower for w in ["presentation", "slide deck", "powerpoint", "pptx", "briefing deck", "create ppt", "generate ppt", "create slides", "make slides"]) or re.search(r"\b\d+-slide\b|\bslides\b", task_lower):
+        return RoutingDecision(
+            task_type="ppt",
+            model_role=MODEL_ROLE_BY_TASK_TYPE["ppt"],
+            tools_needed=TOOLS_BY_TASK_TYPE["ppt"],
+            reason="explicit presentation / slide deck creation directive detected",
+        )
+
+    # Explicit Spreadsheet / Excel creation intent
+    if any(w in task_lower for w in ["spreadsheet", "excel", "xlsx", "sheet with formula", "create sheet", "generate excel", "cost sheet", "log sheet", "balance sheet", "table in excel", "create spreadsheet", "generate spreadsheet"]):
+        return RoutingDecision(
+            task_type="excel",
+            model_role=MODEL_ROLE_BY_TASK_TYPE["excel"],
+            tools_needed=TOOLS_BY_TASK_TYPE["excel"],
+            reason="explicit spreadsheet / Excel workbook creation directive detected",
         )
 
     scores = _score_task(task_lower)
