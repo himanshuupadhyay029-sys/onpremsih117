@@ -26,7 +26,7 @@ from backend.brain.event_bus import emit_sync
 from backend.brain.router import route
 from backend.brain.state import AgentState
 from backend.brain.tools_dispatch import dispatch_tool
-from backend.engine import ollama, registry
+from backend.engine import active_llm as ollama, registry
 from backend.guard.approve import assess_risk, request_approval
 from backend.tools.calc import calculate as calc_tool
 from backend.tools.code import write_and_run as code_tool_run

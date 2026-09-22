@@ -53,17 +53,22 @@ from backend.shield.monitor import (
 
 app = FastAPI(title="KAVACH", description="Phase 10: Frontend UI + Sovereignty Proof + Agent Brain + Auth & Persistent Chat")
 
+cors_origins = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+]
+frontend_origin = os.environ.get("FRONTEND_ORIGIN", "").strip()
+if frontend_origin:
+    cors_origins.append(frontend_origin)
+
 # Explicit CORS configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://localhost:8000",
-        "http://127.0.0.1:8000",
-    ],
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -83,14 +88,33 @@ if VANILLA_FRONTEND_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(VANILLA_FRONTEND_DIR)), name="static")
 
 
+@app.get("/health")
+def health_check():
+    return {
+        "status": "ok",
+        "cloud_mode": config.CLOUD_DEPLOYMENT,
+        "llm_provider": config.LLM_PROVIDER,
+        "docker_sandbox": config.ENABLE_DOCKER_SANDBOX,
+    }
+
+
 @app.on_event("startup")
 def _on_startup() -> None:
-    start_monitor(interval_seconds=1.0)
+    import platform
+    import logging
+    interval = 1.0 if platform.system() == "Windows" else 10.0
+    try:
+        start_monitor(interval_seconds=interval)
+    except Exception as exc:
+        logging.getLogger("kavach.main").warning(
+            f"Sovereignty monitor startup (non-fatal): {exc}"
+        )
 
 
 @app.on_event("shutdown")
 def _on_shutdown() -> None:
     stop_monitor()
+
 
 
 # In-memory snapshot cache for fast task state resumption across anonymous and authenticated sessions

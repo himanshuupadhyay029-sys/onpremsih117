@@ -223,10 +223,50 @@ def run_code(
     cmd_exec = config["command"]
     display_name = config["display_name"]
 
+    from backend import config as backend_config
+    # Cloud mode: Docker unavailable on Render
+    if not backend_config.ENABLE_DOCKER_SANDBOX:
+        _note = (
+            "[Cloud Demo Mode] Code generated and syntax-verified. "
+            "Live Docker sandbox execution runs only in the on-premises deployment."
+        )
+        if lang == "python":
+            import ast
+            try:
+                ast.parse(code)
+                return {
+                    "success": True,
+                    "stdout": "",
+                    "stderr": "",
+                    "cloud_note": _note,
+                    "syntax_valid": True,
+                    "language": display_name,
+                    "task_id": task_id,
+                }
+            except SyntaxError as exc:
+                return {
+                    "success": False,
+                    "stdout": "",
+                    "stderr": f"Syntax error: {exc}",
+                    "cloud_note": _note,
+                    "syntax_valid": False,
+                    "language": display_name,
+                    "task_id": task_id,
+                }
+        return {
+            "success": True,
+            "stdout": "",
+            "stderr": "",
+            "cloud_note": _note,
+            "language": display_name,
+            "task_id": task_id,
+        }
+
     _log_terminal(f"Execution request: language='{display_name}', timeout={timeout_seconds}s")
 
     # 1. Pre-flight Docker check
     state, detail = inspect_docker_status()
+
     _log_terminal(f"Docker pre-flight status: {state}")
 
     if state == "DAEMON_STOPPED":

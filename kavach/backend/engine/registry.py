@@ -19,13 +19,20 @@ def load_registry() -> Dict[str, str]:
 
 
 def get_model(role: str) -> str:
-    """Returns the model tag assigned to a specific task role, with smart fallback."""
+    """Returns the model identifier for a specific task role, with smart fallback.
+    HF cloud mode: returns HF model ID from config, no Ollama validation.
+    Ollama local mode: validates against installed models as before.
+    """
+    if config.LLM_PROVIDER == "huggingface":
+        return config.HF_MODELS.get(role, config.HF_MODELS.get("reasoning", "Qwen/Qwen2.5-7B-Instruct"))
+
     reg = load_registry()
     if role not in reg:
         raise KeyError(f"Role '{role}' not found in model registry. Available roles: {list(reg.keys())}")
     
     target_tag = reg[role]
     from backend.engine import ollama
+
     try:
         installed = ollama.list_models()
     except Exception:

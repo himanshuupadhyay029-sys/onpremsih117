@@ -6,17 +6,56 @@ Supports:
 3. Interactive on-demand Windows UAC elevation via ShellExecuteExW when requested by the user.
 """
 
-import ctypes
-from ctypes import wintypes
 import json
 import logging
 import os
+import platform
 import re
 import subprocess
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Optional
+
+_IS_WINDOWS = platform.system() == "Windows"
+
+if _IS_WINDOWS:
+    import ctypes
+    from ctypes import wintypes
+
+    class SHELLEXECUTEINFO(ctypes.Structure):
+        _fields_ = [
+            ("cbSize", wintypes.DWORD),
+            ("fMask", wintypes.ULONG),
+            ("hwnd", wintypes.HWND),
+            ("lpVerb", wintypes.LPCWSTR),
+            ("lpFile", wintypes.LPCWSTR),
+            ("lpParameters", wintypes.LPCWSTR),
+            ("lpDirectory", wintypes.LPCWSTR),
+            ("nShow", ctypes.c_int),
+            ("hInstApp", wintypes.HINSTANCE),
+            ("lpIDList", wintypes.LPVOID),
+            ("lpClass", wintypes.LPCWSTR),
+            ("hkeyClass", wintypes.HKEY),
+            ("dwHotKey", wintypes.DWORD),
+            ("hIcon", wintypes.HANDLE),
+            ("hProcess", wintypes.HANDLE),
+        ]
+
+    SEE_MASK_NOCLOSEPROCESS = 0x00000040
+    SEE_MASK_NOASYNC = 0x00000100
+    SW_SHOWNORMAL = 1
+    SW_HIDE = 0
+    INFINITE = 0xFFFFFFFF
+else:
+    ctypes = None
+    wintypes = None
+    SHELLEXECUTEINFO = None
+    SEE_MASK_NOCLOSEPROCESS = 0
+    SEE_MASK_NOASYNC = 0
+    SW_SHOWNORMAL = 0
+    SW_HIDE = 0
+    INFINITE = 0
 
 from backend import config
 from backend.audit.logbook import log_event
@@ -32,38 +71,14 @@ STATE_FILE = config.OUTPUTS_DIR / "firewall_lockdown_state.json"
 HELPER_SCRIPT = config.PROJECT_ROOT / "scripts" / "firewall_helper.ps1"
 
 
-class SHELLEXECUTEINFO(ctypes.Structure):
-    _fields_ = [
-        ("cbSize", wintypes.DWORD),
-        ("fMask", wintypes.ULONG),
-        ("hwnd", wintypes.HWND),
-        ("lpVerb", wintypes.LPCWSTR),
-        ("lpFile", wintypes.LPCWSTR),
-        ("lpParameters", wintypes.LPCWSTR),
-        ("lpDirectory", wintypes.LPCWSTR),
-        ("nShow", ctypes.c_int),
-        ("hInstApp", wintypes.HINSTANCE),
-        ("lpIDList", wintypes.LPVOID),
-        ("lpClass", wintypes.LPCWSTR),
-        ("hkeyClass", wintypes.HKEY),
-        ("dwHotKey", wintypes.DWORD),
-        ("hIcon", wintypes.HANDLE),
-        ("hProcess", wintypes.HANDLE),
-    ]
-
-
-SEE_MASK_NOCLOSEPROCESS = 0x00000040
-SEE_MASK_NOASYNC = 0x00000100
-SW_SHOWNORMAL = 1
-SW_HIDE = 0
-INFINITE = 0xFFFFFFFF
-
-
 def _is_admin() -> bool:
+    if not _IS_WINDOWS:
+        return False
     try:
         return bool(ctypes.windll.shell32.IsUserAnAdmin())
     except Exception:
         return False
+
 
 
 def _run_netsh(args: list) -> subprocess.CompletedProcess:
@@ -88,6 +103,8 @@ def _run_scheduled_task(task_name: str) -> bool:
 
 def trigger_uac_elevation(action: str, subnet_cidr: str = "") -> bool:
     """Triggers standard Windows UAC elevation dialog using ShellExecuteExW."""
+    if not _IS_WINDOWS:
+        return False
     try:
         helper_path = str(HELPER_SCRIPT)
         if not Path(helper_path).exists():
@@ -133,6 +150,8 @@ def trigger_uac_elevation(action: str, subnet_cidr: str = "") -> bool:
 
 
 def _get_current_policy_pair() -> Optional[Dict[str, str]]:
+    if not _IS_WINDOWS:
+        return None
     result = _run_netsh(["advfirewall", "show", "currentprofile", "firewallpolicy"])
     if result.returncode != 0:
         return None
@@ -143,6 +162,8 @@ def _get_current_policy_pair() -> Optional[Dict[str, str]]:
 
 
 def _rule_exists(rule_name: str) -> bool:
+    if not _IS_WINDOWS:
+        return False
     result = _run_netsh(["advfirewall", "firewall", "show", "rule", f"name={rule_name}"])
     output = (result.stdout or "") + (result.stderr or "")
     return "No rules match" not in output and rule_name in output
@@ -158,6 +179,23 @@ def _load_state() -> Dict:
 
 
 def check_firewall_status() -> Dict:
+    if not _IS_WINDOWS:
+        return {
+            "status": "simulated",
+            "platform": "linux",
+            "active": False,
+            "rules": [],
+            "note": "Firewall lockdown enforced only in the on-premises Windows deployment.",
+            "is_admin": False,
+            "has_scheduled_task": False,
+            "hardware_enforced": False,
+            "outbound_policy": "AllowOutbound",
+            "localhost_rule_present": False,
+            "subnet_rule_present": False,
+            "detected_subnet": "127.0.0.1/8",
+            "enabled_at": None,
+            "rule_names": [RULE_NAME_LOCALHOST, RULE_NAME_SUBNET],
+        }
     localhost_rule = _rule_exists(RULE_NAME_LOCALHOST)
     subnet_rule = _rule_exists(RULE_NAME_SUBNET)
     policy = _get_current_policy_pair()
@@ -181,11 +219,20 @@ def check_firewall_status() -> Dict:
     }
 
 
+
 def enable_firewall_lockdown(elevate: bool = False) -> Dict:
+    if not _IS_WINDOWS:
+        return {
+            "success": True,
+            "simulated": True,
+            "active": True,
+            "note": "Cloud demo — firewall lockdown simulated on Linux.",
+        }
     net = detect_local_network()
     prior_policy = _get_current_policy_pair() or {"inbound": "BlockInbound", "outbound": "AllowOutbound"}
     is_admin = _is_admin()
     applied_hardware = False
+
 
     # Tier 1: Process is already running elevated
     if is_admin:
@@ -264,8 +311,16 @@ def enable_firewall_lockdown(elevate: bool = False) -> Dict:
 
 
 def disable_firewall_lockdown(elevate: bool = False) -> Dict:
+    if not _IS_WINDOWS:
+        return {
+            "success": True,
+            "simulated": True,
+            "active": False,
+            "note": "Cloud demo — firewall lockdown simulated on Linux.",
+        }
     state = _load_state()
     prior_inbound = state.get("prior_inbound_policy", "BlockInbound")
+
     prior_outbound = state.get("prior_outbound_policy", "AllowOutbound")
     is_admin = _is_admin()
     disabled_hardware = False

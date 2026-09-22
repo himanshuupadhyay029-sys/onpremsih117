@@ -7,7 +7,8 @@ import AuditLogScreen from './components/AuditLogScreen';
 import ModelSettingsScreen from './components/ModelSettingsScreen';
 import AuthModal from './components/AuthModal';
 
-const API_BASE = '';
+const API_BASE = import.meta.env.VITE_API_BASE || '';
+
 
 export default function App() {
   const [activeScreen, setActiveScreen] = useState('task');

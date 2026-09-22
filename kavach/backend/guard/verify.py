@@ -12,7 +12,7 @@ import re
 from typing import Any, Dict, List, Optional, Union
 
 from backend.audit.logbook import log_event
-from backend.engine import ollama, registry
+from backend.engine import active_llm as ollama, registry
 
 EXTRACT_CLAIMS_PROMPT = """You are a factual verification assistant. Read the document text below and extract 2 to 4 key factual, procedural, or numerical claims made in it.
 

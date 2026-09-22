@@ -16,21 +16,25 @@ FALLBACK_SUBNET_CIDR = "192.168.0.0/24"
 
 def detect_local_network() -> Dict[str, str]:
     """Returns this machine's LAN IP and its /24 subnet, auto-detected (never hardcoded)."""
-    local_ip = "127.0.0.1"
     try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        local_ip = "127.0.0.1"
         try:
-            s.connect(("8.8.8.8", 80))  # no packet sent; just asks the OS for the outbound route
-            local_ip = s.getsockname()[0]
-        finally:
-            s.close()
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            try:
+                s.connect(("8.8.8.8", 80))  # no packet sent; just asks the OS for the outbound route
+                local_ip = s.getsockname()[0]
+            finally:
+                s.close()
+        except Exception:
+            pass
+
+        parts = local_ip.split(".")
+        if len(parts) == 4 and local_ip != "127.0.0.1":
+            subnet_cidr = f"{parts[0]}.{parts[1]}.{parts[2]}.0/24"
+        else:
+            subnet_cidr = FALLBACK_SUBNET_CIDR
+
+        return {"local_ip": local_ip, "subnet_cidr": subnet_cidr}
     except Exception:
-        pass
+        return {"local_ip": "127.0.0.1", "subnet_cidr": FALLBACK_SUBNET_CIDR}
 
-    parts = local_ip.split(".")
-    if len(parts) == 4 and local_ip != "127.0.0.1":
-        subnet_cidr = f"{parts[0]}.{parts[1]}.{parts[2]}.0/24"
-    else:
-        subnet_cidr = FALLBACK_SUBNET_CIDR
-
-    return {"local_ip": local_ip, "subnet_cidr": subnet_cidr}

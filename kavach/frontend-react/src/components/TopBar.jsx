@@ -1,7 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import LockdownModal from './LockdownModal';
 
+const IS_CLOUD = import.meta.env.VITE_CLOUD_DEPLOYMENT === 'true';
+
 export default function TopBar({ sidebarCollapsed, onToggleSidebar }) {
+
   const [externalCount, setExternalCount] = useState(null);
   const [monitorStatus, setMonitorStatus] = useState('Connecting to monitor…');
   const [lockdownOn, setLockdownOn] = useState(false);
@@ -152,7 +155,23 @@ export default function TopBar({ sidebarCollapsed, onToggleSidebar }) {
             </svg>
           </button>
         )}
+        {IS_CLOUD && (
+          <div style={{
+            background: 'rgba(251, 191, 36, 0.12)',
+            border: '1px solid rgba(251, 191, 36, 0.4)',
+            color: '#fbbf24',
+            fontSize: '0.72rem',
+            fontWeight: 500,
+            padding: '3px 10px',
+            borderRadius: '4px',
+            letterSpacing: '0.03em',
+            whiteSpace: 'nowrap',
+          }}>
+            ☁️ Cloud Demo — Sovereignty Shield &amp; Docker Sandbox are on-premises only
+          </div>
+        )}
       </div>
+
 
       <div className="topbar-right">
         <div className="sovereignty" title="Live connection monitor">

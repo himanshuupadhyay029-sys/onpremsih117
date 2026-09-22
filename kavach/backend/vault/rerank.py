@@ -10,7 +10,7 @@ import logging
 import re
 from typing import Dict, List, Optional
 
-from backend.engine import ollama, registry
+from backend.engine import active_llm as ollama, registry
 
 logger = logging.getLogger("kavach.rerank")
 DEFAULT_THRESHOLD = 0.25

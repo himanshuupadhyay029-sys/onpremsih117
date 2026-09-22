@@ -18,7 +18,7 @@ import numpy as np
 
 import time
 from backend.audit.logbook import get_current_user_id
-from backend.engine import ollama, registry
+from backend.engine import active_llm as ollama, registry
 from backend.terminal_logger import log_tool
 from backend.vault.bm25 import BM25Index
 from backend.vault.ingest import get_user_paths

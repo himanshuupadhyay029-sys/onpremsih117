@@ -15,6 +15,14 @@ faiss_index/
 *.faiss
 *.pkl
 
+# Exception: track the global shared knowledge FAISS index for cloud deployment
+# (User-specific indexes under knowledge/users/ remain excluded)
+!knowledge/faiss_index/
+!knowledge/faiss_index/index.faiss
+!knowledge/faiss_index/metadata.json
+!knowledge/faiss_index/bm25.json
+
+
 # Outputs & audit logs (per backend/config.py)
 outputs/
 audit_log.jsonl

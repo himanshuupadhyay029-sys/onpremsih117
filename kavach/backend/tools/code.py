@@ -13,7 +13,7 @@ from datetime import datetime
 import re
 from typing import Dict, Optional
 
-from backend.engine import ollama, registry
+from backend.engine import active_llm as ollama, registry
 from backend.engine.prompts import CODING_SYSTEM_PROMPT
 from backend.tools.sandbox import run_code
 

@@ -14,7 +14,7 @@ import re
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from backend.audit.logbook import log_event
-from backend.engine import ollama, registry
+from backend.engine import active_llm as ollama, registry
 import time
 from backend.terminal_logger import log_tool, _truncate
 

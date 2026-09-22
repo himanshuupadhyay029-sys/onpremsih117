@@ -1,0 +1,127 @@
+[
+  {
+    "source_filename": "access_control_sop.md",
+    "chunk_text": "# Access Control and Password Policy ## Purpose This SOP governs authentication, password rules, and periodic access review for all company systems. ## Password Requirements - Minimum password length: 12 characters, including at least one number and one special character. - Passwords must be rotated every 90 days. - Password reuse is blocked for the last 10 passwords. ## Account Lockout - Accounts are locked after 5 consecutive failed login attempts. - Lockout duration is 30 minutes, after which",
+    "chunk_index": 0
+  },
+  {
+    "source_filename": "access_control_sop.md",
+    "chunk_text": "attempts. - Lockout duration is 30 minutes, after which the account automatically unlocks. ## Multi-Factor Authentication Multi-factor authentication (MFA) is mandatory for all privileged and administrator accounts. Standard user accounts must enable MFA within 30 days of account creation. ## Access Review The Security Team reviews all user access rights quarterly. Any access not justified by current role requirements must be revoked within 5 business days of the review.",
+    "chunk_index": 1
+  },
+  {
+    "source_filename": "data_backup_policy.md",
+    "chunk_text": "# Data Backup and Retention Policy ## Purpose This policy defines backup scheduling, retention, and recovery objectives for all production systems. ## Backup Schedule - Full backups run every Sunday at 02:00 IST. - Incremental backups run daily at 23:00 IST. - Backup jobs are monitored by the Infrastructure Team; any failed job must be re-run within 4 hours of the failure alert. ## Retention - Daily incremental backups are retained for 45 days. - Monthly full backup archives are retained for 1 year.",
+    "chunk_index": 0
+  },
+  {
+    "source_filename": "data_backup_policy.md",
+    "chunk_text": "Monthly full backup archives are retained for 1 year. - Backups older than the retention window are securely purged automatically. ## Recovery Objectives - Recovery Time Objective (RTO): 4 hours. - Recovery Point Objective (RPO): 24 hours. ## Restoration Testing Backup restoration must be tested quarterly by restoring a sample dataset to a staging environment and verifying data integrity. Results are logged in the quarterly compliance report.",
+    "chunk_index": 1
+  },
+  {
+    "source_filename": "incident_response_sop.md",
+    "chunk_text": "# Incident Response SOP ## Purpose This Standard Operating Procedure defines how the organization detects, triages, escalates, and closes out operational incidents. ## Severity Levels and Response Times - Severity 1 (Critical): must be acknowledged by the on-call engineer within 15 minutes of detection. An Incident Commander must be assigned within 30 minutes of acknowledgement. - Severity 2 (High): must be acknowledged within 1 hour of detection. - Severity 3 (Medium): must be acknowledged within",
+    "chunk_index": 0
+  },
+  {
+    "source_filename": "incident_response_sop.md",
+    "chunk_text": "- Severity 3 (Medium): must be acknowledged within 4 business hours. - Severity 4 (Low): must be acknowledged within 2 business days. ## Incident Commander Responsibilities The Incident Commander owns the incident end-to-end: coordinating responders, communicating status to stakeholders every 30 minutes during a Severity 1 event, and declaring when the incident is resolved. ## Escalation If a Severity 1 incident is not acknowledged within the 15 minute window, it is automatically escalated to the",
+    "chunk_index": 1
+  },
+  {
+    "source_filename": "incident_response_sop.md",
+    "chunk_text": "minute window, it is automatically escalated to the Duty Manager on-call rotation. ## Post-Incident Review A post-incident review report is due within 5 business days after an incident is closed. The report must include a root cause analysis and at least one corrective action item. ## Log Retention All incident logs, including chat transcripts and timeline entries, must be retained for 180 days from the incident closure date.",
+    "chunk_index": 2
+  },
+  {
+    "source_filename": "access_control_sop.md",
+    "chunk_text": "# Access Control and Password Policy ## Purpose This SOP governs authentication, password rules, and periodic access review for all company systems. ## Password Requirements - Minimum password length: 12 characters, including at least one number and one special character. - Passwords must be rotated every 90 days. - Password reuse is blocked for the last 10 passwords. ## Account Lockout - Accounts are locked after 5 consecutive failed login attempts. - Lockout duration is 30 minutes, after which",
+    "chunk_index": 0
+  },
+  {
+    "source_filename": "access_control_sop.md",
+    "chunk_text": "attempts. - Lockout duration is 30 minutes, after which the account automatically unlocks. ## Multi-Factor Authentication Multi-factor authentication (MFA) is mandatory for all privileged and administrator accounts. Standard user accounts must enable MFA within 30 days of account creation. ## Access Review The Security Team reviews all user access rights quarterly. Any access not justified by current role requirements must be revoked within 5 business days of the review.",
+    "chunk_index": 1
+  },
+  {
+    "source_filename": "data_backup_policy.md",
+    "chunk_text": "# Data Backup and Retention Policy ## Purpose This policy defines backup scheduling, retention, and recovery objectives for all production systems. ## Backup Schedule - Full backups run every Sunday at 02:00 IST. - Incremental backups run daily at 23:00 IST. - Backup jobs are monitored by the Infrastructure Team; any failed job must be re-run within 4 hours of the failure alert. ## Retention - Daily incremental backups are retained for 45 days. - Monthly full backup archives are retained for 1 year.",
+    "chunk_index": 0
+  },
+  {
+    "source_filename": "data_backup_policy.md",
+    "chunk_text": "Monthly full backup archives are retained for 1 year. - Backups older than the retention window are securely purged automatically. ## Recovery Objectives - Recovery Time Objective (RTO): 4 hours. - Recovery Point Objective (RPO): 24 hours. ## Restoration Testing Backup restoration must be tested quarterly by restoring a sample dataset to a staging environment and verifying data integrity. Results are logged in the quarterly compliance report.",
+    "chunk_index": 1
+  },
+  {
+    "source_filename": "incident_response_sop.md",
+    "chunk_text": "# Incident Response SOP ## Purpose This Standard Operating Procedure defines how the organization detects, triages, escalates, and closes out operational incidents. ## Severity Levels and Response Times - Severity 1 (Critical): must be acknowledged by the on-call engineer within 15 minutes of detection. An Incident Commander must be assigned within 30 minutes of acknowledgement. - Severity 2 (High): must be acknowledged within 1 hour of detection. - Severity 3 (Medium): must be acknowledged within",
+    "chunk_index": 0
+  },
+  {
+    "source_filename": "incident_response_sop.md",
+    "chunk_text": "- Severity 3 (Medium): must be acknowledged within 4 business hours. - Severity 4 (Low): must be acknowledged within 2 business days. ## Incident Commander Responsibilities The Incident Commander owns the incident end-to-end: coordinating responders, communicating status to stakeholders every 30 minutes during a Severity 1 event, and declaring when the incident is resolved. ## Escalation If a Severity 1 incident is not acknowledged within the 15 minute window, it is automatically escalated to the",
+    "chunk_index": 1
+  },
+  {
+    "source_filename": "incident_response_sop.md",
+    "chunk_text": "minute window, it is automatically escalated to the Duty Manager on-call rotation. ## Post-Incident Review A post-incident review report is due within 5 business days after an incident is closed. The report must include a root cause analysis and at least one corrective action item. ## Log Retention All incident logs, including chat transcripts and timeline entries, must be retained for 180 days from the incident closure date.",
+    "chunk_index": 2
+  },
+  {
+    "source_filename": "emergency_shutdown_sop.md",
+    "chunk_text": "# Emergency Shutdown SOP ## Purpose Defines the procedure for an emergency shutdown of plant equipment. ## Trigger Conditions - Reactor pressure exceeds 12.5 bar. - Coolant flow drops below 40 litres per minute. ## Shutdown Sequence 1. The operator must press the Emergency Stop within 10 seconds of the alarm. 2. Isolate the feed valve within 2 minutes. 3. Notify the Shift Supervisor immediately. ## Restart Authorization Restart requires written sign-off from the Plant Safety Officer, and may not",
+    "chunk_index": 0
+  },
+  {
+    "source_filename": "emergency_shutdown_sop.md",
+    "chunk_text": "sign-off from the Plant Safety Officer, and may not occur less than 6 hours after an emergency shutdown.",
+    "chunk_index": 1
+  },
+  {
+    "source_filename": "incident_response_sop.md",
+    "chunk_text": "# Incident Response SOP ## Purpose This Standard Operating Procedure defines how the organization detects, triages, escalates, and closes out operational incidents. ## Severity Levels and Response Times - Severity 1 (Critical): must be acknowledged by the on-call engineer within 15 minutes of detection. An Incident Commander must be assigned within 30 minutes of acknowledgement. - Severity 2 (High): must be acknowledged within 1 hour of detection. - Severity 3 (Medium): must be acknowledged within",
+    "chunk_index": 0
+  },
+  {
+    "source_filename": "incident_response_sop.md",
+    "chunk_text": "- Severity 3 (Medium): must be acknowledged within 4 business hours. - Severity 4 (Low): must be acknowledged within 2 business days. ## Incident Commander Responsibilities The Incident Commander owns the incident end-to-end: coordinating responders, communicating status to stakeholders every 30 minutes during a Severity 1 event, and declaring when the incident is resolved. ## Escalation If a Severity 1 incident is not acknowledged within the 15 minute window, it is automatically escalated to the",
+    "chunk_index": 1
+  },
+  {
+    "source_filename": "incident_response_sop.md",
+    "chunk_text": "minute window, it is automatically escalated to the Duty Manager on-call rotation. ## Post-Incident Review A post-incident review report is due within 5 business days after an incident is closed. The report must include a root cause analysis and at least one corrective action item. ## Log Retention All incident logs, including chat transcripts and timeline entries, must be retained for 180 days from the incident closure date.",
+    "chunk_index": 2
+  },
+  {
+    "source_filename": "test_upload.md",
+    "chunk_text": "# Test Document This is a test SOP for knowledge vault upload validation.",
+    "chunk_index": 0
+  },
+  {
+    "source_filename": "img20260721_18443535.pdf",
+    "chunk_text": "\u2014fo } 262 4 | 6 4 -4 6, le GST TAX INVOICE (ORIGINAL FOR RECIPIENT) APEX ENTERPRISES imeies Ne. Dated 27, Vijay Chambers, 1st. Floor, AE/4081/2627 20-Jul-26 Opp. Dreamland Cinema, Tribhuvan Road, Mode/Terms of Payment Grant Road (E), Mumbai - 400 004 45 Days GSTIN/UIN: 27AAHFA5744J1Z9 State Name: Maharashtra, Code : 27 Contact : 022-42128888/23895548 E-Mail : info@apexenterprises.in URC - UDYAM-MH-19-0088837 Reference No. & Date. hes References Buyer's Order No. Dated Buyer (Bill to) Terms of Delivery",
+    "chunk_index": 0
+  },
+  {
+    "source_filename": "img20260721_18443535.pdf",
+    "chunk_text": "Order No. Dated Buyer (Bill to) Terms of Delivery Benchmark Computer Solutions Limited 501, 5th Floor, Kushwah Chambers, Makhawana 0F15\u00a2 Road, Marol Naka, Andheri East, Mumbai \u2014 400059, Tel#40822 106/40822107/40822100, Dipesh Account - 40822105 Hs GSTIN/UIN : 27AACCB3357N1ZE Contact person : Mr. Hemant Contact > 40822106/07/40822 100/2687561 , 9820131088 E-Mail : accounts@benchmarksolution.com sl Description of Goods HSN/SAC Quantity Rate per | Disc. % Amount No. be t \u2014 | 1 | Dell 27\" Professional",
+    "chunk_index": 1
+  },
+  {
+    "source_filename": "img20260721_18443535.pdf",
+    "chunk_text": "Disc. % Amount No. be t \u2014 | 1 | Dell 27\" Professional Led Monitor (P2725H) 85285200 5No.| 13,008.47] No. 65,042.35 Warranty 3 - Years by Dell ASP. Sr.No. @BKTFLFA sosr cass. @) HG TF LFY Round Off 0.03 Total 5 No. = 76,750.00 Amount Chargeable (in words) E&OE INR Seventy Six Thousand Seven Hundred Fifty Only HSN/SAC Taxable Central Tax State Tax Total ; Value Rate Amount Rate Amount Tax Amount 85285200 65,042.35 9% 5,853.81 9% 5,853.81 11,707.62 Total 65,042.35 5,853.81 | 5,853.81 11,707.62) Tax",
+    "chunk_index": 2
+  },
+  {
+    "source_filename": "img20260721_18443535.pdf",
+    "chunk_text": "Total 65,042.35 5,853.81 | 5,853.81 11,707.62) Tax Amount (in words) : INR Eleven Thousand Seven Hundred Seven and Sixty Two paise Only Declaration Apex Enterprises is Registered under MSMED Act 2008 vide Company's Bank Details UDYAM Registration Number - UDYAM-MH-19-0088837. Bank Name : Kotak Mahindra Bank We declare that this invoice shows the actual price of the goods 9 A/c No. : 650044012099 described and that all particulars are true and correct. Branch & IFS Code : Hughes Road &K B ; Customer's",
+    "chunk_index": 3
+  },
+  {
+    "source_filename": "img20260721_18443535.pdf",
+    "chunk_text": "Branch & IFS Code : Hughes Road &K B ; Customer's Seal and Signature Pa Ap \u00e9 RPRISES This is a Computer Generated Invoice",
+    "chunk_index": 4
+  }
+]

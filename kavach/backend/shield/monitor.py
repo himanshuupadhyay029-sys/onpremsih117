@@ -65,13 +65,14 @@ def _get_kavach_pids() -> Set[int]:
     except (psutil.NoSuchProcess, psutil.AccessDenied):
         pass
 
-    for proc in psutil.process_iter(["pid", "name"]):
-        try:
-            name = (proc.info.get("name") or "").lower()
-            if any(hint in name for hint in OLLAMA_PROCESS_NAME_HINTS):
-                pids.add(proc.info["pid"])
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            continue
+    if config.LLM_PROVIDER == "ollama":
+        for proc in psutil.process_iter(["pid", "name"]):
+            try:
+                name = (proc.info.get("name") or "").lower()
+                if any(hint in name for hint in OLLAMA_PROCESS_NAME_HINTS):
+                    pids.add(proc.info["pid"])
+            except (psutil.NoSuchProcess, psutil.AccessDenied, OSError):
+                continue
 
     return pids
 
@@ -100,8 +101,9 @@ def get_active_connections() -> List[Dict]:
 
     try:
         conns = psutil.net_connections(kind="inet")
-    except (psutil.AccessDenied, PermissionError):
+    except (psutil.AccessDenied, PermissionError, OSError):
         conns = []
+
 
     results: List[Dict] = []
     for c in conns:

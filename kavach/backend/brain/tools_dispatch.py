@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import uuid
 
 from backend.audit.logbook import log_event
-from backend.engine import ollama, registry
+from backend.engine import active_llm as ollama, registry
 from backend.guard.approve import assess_risk, request_approval
 from backend.tools.calc import calculate as calc_tool
 from backend.tools.code import write_and_run as code_tool_run

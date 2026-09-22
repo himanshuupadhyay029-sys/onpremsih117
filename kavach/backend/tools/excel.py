@@ -28,7 +28,7 @@ except ImportError:
 
 from backend import config
 from backend.audit.logbook import log_event
-from backend.engine import ollama, registry
+from backend.engine import active_llm as ollama, registry
 from backend.terminal_logger import log_tool
 
 

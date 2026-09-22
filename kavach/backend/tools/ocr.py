@@ -26,19 +26,24 @@ def _run_tesseract_ocr(img_input) -> Optional[Dict[str, Any]]:
     try:
         import pytesseract
         from PIL import Image
-
-        # Auto-configure tesseract_cmd on Windows if not already in PATH
         import shutil
+
+        # Check if tesseract binary exists
         if not shutil.which("tesseract"):
             candidates = [
                 Path(r"C:\Program Files\Tesseract-OCR\tesseract.exe"),
                 Path(r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe"),
                 Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Tesseract-OCR" / "tesseract.exe",
             ]
+            found = False
             for candidate in candidates:
                 if candidate.exists():
                     pytesseract.pytesseract.tesseract_cmd = str(candidate)
+                    found = True
                     break
+            if not found and not shutil.which("tesseract"):
+                return None
+
 
         if isinstance(img_input, (str, Path)):
             image = Image.open(str(img_input))
