@@ -102,6 +102,7 @@ def health_check():
         "cloud_mode": config.CLOUD_DEPLOYMENT,
         "llm_provider": config.LLM_PROVIDER,
         "docker_sandbox": config.ENABLE_DOCKER_SANDBOX,
+        "version": "router-v1-fallback-v2",
     }
 
 
