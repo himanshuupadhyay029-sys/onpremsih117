@@ -104,7 +104,7 @@ export default function KnowledgeVaultScreen({ user, onShowAuth }) {
     setIsDeleting(true);
 
     try {
-      const res = await fetch(`/knowledge/${encodeURIComponent(filename)}`, {
+      const res = await fetch(`${API_BASE}/knowledge/${encodeURIComponent(filename)}`, {
         method: 'DELETE',
         credentials: 'include',
       });

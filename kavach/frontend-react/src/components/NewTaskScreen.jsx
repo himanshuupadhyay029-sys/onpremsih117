@@ -228,7 +228,7 @@ export default function NewTaskScreen({
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(`/chats/${encodeURIComponent(activeChatId)}/messages`, {
+        const res = await fetch(`${API_BASE}/chats/${encodeURIComponent(activeChatId)}/messages`, {
           credentials: 'include',
         });
         if (res.ok && !cancelled) {
@@ -677,13 +677,13 @@ export default function NewTaskScreen({
       );
     }, 1000);
 
-    let streamUrl = `/run/stream?task=${encodeURIComponent(fullTask)}&task_id=${encodeURIComponent(taskId)}${activeChatId ? `&chat_id=${encodeURIComponent(activeChatId)}` : ''}${attachmentType ? `&attachment_type=${encodeURIComponent(attachmentType)}` : ''}`;
+    let streamUrl = `${API_BASE}/run/stream?task=${encodeURIComponent(fullTask)}&task_id=${encodeURIComponent(taskId)}${activeChatId ? `&chat_id=${encodeURIComponent(activeChatId)}` : ''}${attachmentType ? `&attachment_type=${encodeURIComponent(attachmentType)}` : ''}`;
     if (taggedVaultFiles.length > 0) {
       taggedVaultFiles.forEach((vf) => {
         streamUrl += `&vault_files=${encodeURIComponent(vf)}`;
       });
     }
-    const eventSource = new EventSource(streamUrl);
+    const eventSource = new EventSource(streamUrl, { withCredentials: true });
 
     eventSource.addEventListener('plan', (e) => {
       try {
@@ -924,7 +924,7 @@ export default function NewTaskScreen({
     ]);
 
     try {
-      const res = await fetch(`/run/${encodeURIComponent(taskId)}/reply`, {
+      const res = await fetch(`${API_BASE}/run/${encodeURIComponent(taskId)}/reply`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -972,7 +972,7 @@ export default function NewTaskScreen({
     }));
 
     try {
-      const res = await fetch(`/approval/${encodeURIComponent(taskId)}`, {
+      const res = await fetch(`${API_BASE}/approval/${encodeURIComponent(taskId)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -1025,7 +1025,7 @@ export default function NewTaskScreen({
     }));
 
     try {
-      const res = await fetch(`/approval/${encodeURIComponent(taskId)}`, {
+      const res = await fetch(`${API_BASE}/approval/${encodeURIComponent(taskId)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
