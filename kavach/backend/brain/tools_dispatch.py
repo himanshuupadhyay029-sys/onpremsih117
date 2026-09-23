@@ -268,22 +268,22 @@ def dispatch_tool(
             timeout_seconds=CODE_TIMEOUT_SECONDS,
             task_id=state.get("task_id"),
         )
-        is_error = not code_result["success"]
+        is_error = not code_result.get("success", False)
         if is_error:
             output = (
-                f"[error] code execution failed (exit_code={code_result['exit_code']}, "
-                f"timed_out={code_result['timed_out']}).\nstderr:\n{code_result['stderr']}"
+                f"[error] code execution failed (exit_code={code_result.get('exit_code', -1)}, "
+                f"timed_out={code_result.get('timed_out', False)}).\nstderr:\n{code_result.get('stderr', '')}"
             )
         else:
-            output = f"Code executed successfully (exit_code=0).\nstdout:\n{code_result['stdout']}"
+            output = f"Code executed successfully (exit_code=0).\nstdout:\n{code_result.get('stdout', '')}"
 
         code_meta = {
             "language": code_result.get("language", "python"),
-            "code": code_result["code"],
-            "stdout": code_result["stdout"],
-            "stderr": code_result["stderr"],
-            "exit_code": code_result["exit_code"],
-            "timed_out": code_result["timed_out"],
+            "code": code_result.get("code", ""),
+            "stdout": code_result.get("stdout", ""),
+            "stderr": code_result.get("stderr", ""),
+            "exit_code": code_result.get("exit_code", 0),
+            "timed_out": code_result.get("timed_out", False),
             "duration_seconds": code_result.get("duration_seconds", 0.0),
         }
 

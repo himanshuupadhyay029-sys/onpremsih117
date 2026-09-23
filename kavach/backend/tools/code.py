@@ -189,10 +189,11 @@ def write_and_run(
     return {
         "language": lang,
         "code": code,
-        "success": sandbox_result["success"],
-        "stdout": sandbox_result["stdout"],
-        "stderr": sandbox_result["stderr"],
-        "exit_code": sandbox_result["exit_code"],
-        "timed_out": sandbox_result["timed_out"],
+        "success": sandbox_result.get("success", False),
+        "stdout": sandbox_result.get("stdout", ""),
+        "stderr": sandbox_result.get("stderr", ""),
+        "exit_code": sandbox_result.get("exit_code", 0),
+        "timed_out": sandbox_result.get("timed_out", False),
         "duration_seconds": sandbox_result.get("duration_seconds", 0.0),
+        "cloud_note": sandbox_result.get("cloud_note", ""),
     }

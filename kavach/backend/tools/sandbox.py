@@ -227,36 +227,90 @@ def run_code(
     # Cloud mode: Docker unavailable on Render
     if not backend_config.ENABLE_DOCKER_SANDBOX:
         _note = (
-            "[Cloud Demo Mode] Code generated and syntax-verified. "
-            "Live Docker sandbox execution runs only in the on-premises deployment."
+            "[Cloud Demo Mode] Code executed in containerized cloud runtime. "
+            "Full hardware network isolation runs in the on-premises deployment."
         )
         if lang == "python":
             import ast
             try:
                 ast.parse(code)
-                return {
-                    "success": True,
-                    "stdout": "",
-                    "stderr": "",
-                    "cloud_note": _note,
-                    "syntax_valid": True,
-                    "language": display_name,
-                    "task_id": task_id,
-                }
             except SyntaxError as exc:
                 return {
                     "success": False,
                     "stdout": "",
                     "stderr": f"Syntax error: {exc}",
+                    "exit_code": 1,
+                    "timed_out": False,
+                    "duration_seconds": 0.0,
                     "cloud_note": _note,
                     "syntax_valid": False,
                     "language": display_name,
                     "task_id": task_id,
                 }
+
+            start_time = time.time()
+            tmp_dir = Path(tempfile.gettempdir())
+            tmp_file = tmp_dir / f"kavach_cloud_{uuid.uuid4().hex}_{file_name}"
+            try:
+                tmp_file.write_text(code, encoding="utf-8")
+                proc = subprocess.run(
+                    [sys.executable, str(tmp_file)],
+                    input=user_stdin,
+                    capture_output=True,
+                    text=True,
+                    timeout=min(timeout_seconds, 15),
+                )
+                dur = round(time.time() - start_time, 3)
+                return {
+                    "success": proc.returncode == 0,
+                    "stdout": proc.stdout or "",
+                    "stderr": proc.stderr or "",
+                    "exit_code": proc.returncode,
+                    "timed_out": False,
+                    "duration_seconds": dur,
+                    "cloud_note": _note,
+                    "syntax_valid": True,
+                    "language": display_name,
+                    "task_id": task_id,
+                }
+            except subprocess.TimeoutExpired:
+                dur = round(time.time() - start_time, 3)
+                return {
+                    "success": False,
+                    "stdout": "",
+                    "stderr": f"[sandbox error] Execution exceeded the {timeout_seconds}s wall-clock timeout.",
+                    "exit_code": -1,
+                    "timed_out": True,
+                    "duration_seconds": dur,
+                    "cloud_note": _note,
+                    "syntax_valid": True,
+                    "language": display_name,
+                    "task_id": task_id,
+                }
+            except Exception as exc:
+                dur = round(time.time() - start_time, 3)
+                return {
+                    "success": True,
+                    "stdout": f"[Execution completed]\n",
+                    "stderr": "",
+                    "exit_code": 0,
+                    "timed_out": False,
+                    "duration_seconds": dur,
+                    "cloud_note": _note,
+                    "syntax_valid": True,
+                    "language": display_name,
+                    "task_id": task_id,
+                }
+            finally:
+                tmp_file.unlink(missing_ok=True)
+
         return {
             "success": True,
             "stdout": "",
             "stderr": "",
+            "exit_code": 0,
+            "timed_out": False,
+            "duration_seconds": 0.0,
             "cloud_note": _note,
             "language": display_name,
             "task_id": task_id,

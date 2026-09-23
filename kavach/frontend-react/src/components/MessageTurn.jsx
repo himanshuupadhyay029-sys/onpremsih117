@@ -305,13 +305,13 @@ export default function MessageTurn({
                   fill="none"
                   stroke="currentColor"
                   strokeWidth="2"
-                  style={{ transform: (isStreaming || showThoughts || (!cleanAnswer && !approval && deliverables.length === 0)) ? 'rotate(180deg)' : 'rotate(0deg)' }}
+                  style={{ transform: (isStreaming || showThoughts || (!cleanAnswer && !approval && generatedFiles.length === 0)) ? 'rotate(180deg)' : 'rotate(0deg)' }}
                 >
                   <polyline points="6 9 12 15 18 9" />
                 </svg>
               </button>
 
-              {(isStreaming || showThoughts || (!cleanAnswer && !approval && deliverables.length === 0)) && (
+              {(isStreaming || showThoughts || (!cleanAnswer && !approval && generatedFiles.length === 0)) && (
                 <div className="thought-content-box">
                   {isStreaming && (
                     <div className="thinking" style={{ marginBottom: '6px' }}>

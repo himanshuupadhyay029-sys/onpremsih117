@@ -6,6 +6,7 @@ import KnowledgeVaultScreen from './components/KnowledgeVaultScreen';
 import AuditLogScreen from './components/AuditLogScreen';
 import ModelSettingsScreen from './components/ModelSettingsScreen';
 import AuthModal from './components/AuthModal';
+import ErrorBoundary from './components/ErrorBoundary';
 import { API_BASE } from './config';
 
 
@@ -134,30 +135,31 @@ export default function App() {
         />
 
         <div className={`screens ${activeScreen === 'task' ? 'screens-chat' : ''}`}>
-          {activeScreen === 'task' && (
-            <NewTaskScreen
-              setIsThinking={setIsThinking}
-              user={user}
-              activeChatId={activeChatId}
-              setActiveChatId={setActiveChatId}
-              onShowAuth={() => setShowAuthModal(true)}
-              onChatsUpdated={loadChats}
-            />
-          )}
-          {activeScreen === 'vault' && (
-            <KnowledgeVaultScreen
-              user={user}
-              onShowAuth={() => setShowAuthModal(true)}
-            />
-          )}
-          {activeScreen === 'audit' && (
-            <AuditLogScreen
-              user={user}
-              onShowAuth={() => setShowAuthModal(true)}
-            />
-          )}
-          {activeScreen === 'models' && <ModelSettingsScreen />}
-
+          <ErrorBoundary>
+            {activeScreen === 'task' && (
+              <NewTaskScreen
+                setIsThinking={setIsThinking}
+                user={user}
+                activeChatId={activeChatId}
+                setActiveChatId={setActiveChatId}
+                onShowAuth={() => setShowAuthModal(true)}
+                onChatsUpdated={loadChats}
+              />
+            )}
+            {activeScreen === 'vault' && (
+              <KnowledgeVaultScreen
+                user={user}
+                onShowAuth={() => setShowAuthModal(true)}
+              />
+            )}
+            {activeScreen === 'audit' && (
+              <AuditLogScreen
+                user={user}
+                onShowAuth={() => setShowAuthModal(true)}
+              />
+            )}
+            {activeScreen === 'models' && <ModelSettingsScreen />}
+          </ErrorBoundary>
         </div>
       </main>
 
