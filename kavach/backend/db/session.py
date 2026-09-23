@@ -4,9 +4,15 @@ import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-raw_db_url = os.environ.get("DATABASE_URL", "").strip().strip("\"'")
+raw_db_url = (
+    os.environ.get("DATABASE_URL")
+    or os.environ.get("DATABASE_URL_POOLED")
+    or ""
+).strip().strip("\"'")
 if raw_db_url.startswith("DATABASE_URL="):
     raw_db_url = raw_db_url.split("DATABASE_URL=", 1)[1].strip().strip("\"'")
+if raw_db_url.startswith("DATABASE_URL_POOLED="):
+    raw_db_url = raw_db_url.split("DATABASE_URL_POOLED=", 1)[1].strip().strip("\"'")
 
 if not raw_db_url:
     raw_db_url = "postgresql://kavach:kavach_secret@127.0.0.1:5434/kavach_db"

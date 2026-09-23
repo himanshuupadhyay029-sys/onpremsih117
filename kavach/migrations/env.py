@@ -21,15 +21,26 @@ import backend.db.models  # noqa: F401
 
 target_metadata = Base.metadata
 
-# Override sqlalchemy.url if DATABASE_URL is set in environment
-raw_db_url = os.environ.get("DATABASE_URL", "").strip().strip("\"'")
+# Override sqlalchemy.url if DATABASE_URL or DATABASE_URL_POOLED is set in environment
+raw_db_url = (
+    os.environ.get("DATABASE_URL")
+    or os.environ.get("DATABASE_URL_POOLED")
+    or ""
+).strip().strip("\"'")
 if raw_db_url.startswith("DATABASE_URL="):
     raw_db_url = raw_db_url.split("DATABASE_URL=", 1)[1].strip().strip("\"'")
+if raw_db_url.startswith("DATABASE_URL_POOLED="):
+    raw_db_url = raw_db_url.split("DATABASE_URL_POOLED=", 1)[1].strip().strip("\"'")
 if raw_db_url.startswith("postgres://"):
     raw_db_url = raw_db_url.replace("postgres://", "postgresql://", 1)
 
 if raw_db_url:
     config.set_main_option("sqlalchemy.url", raw_db_url)
+elif os.environ.get("RENDER") or os.environ.get("CLOUD_DEPLOYMENT", "").lower() == "true":
+    raise RuntimeError(
+        "CRITICAL: DATABASE_URL is not set in Render environment variables! "
+        "Please go to Render Dashboard -> Environment, and add DATABASE_URL with your Neon PostgreSQL URL."
+    )
 
 
 def run_migrations_offline() -> None:
