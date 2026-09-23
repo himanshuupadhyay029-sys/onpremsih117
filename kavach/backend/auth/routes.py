@@ -1,6 +1,7 @@
 """routes.py — FastAPI authentication endpoints (register, login, logout, me) and dependencies."""
 
 from typing import Optional
+import os
 import uuid
 
 from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Response, status
@@ -148,13 +149,14 @@ def login(req: LoginRequest, response: Response, db: Session = Depends(get_db)):
     token = create_access_token({"sub": str(user.id), "email": user.email, "name": user.name})
     max_age = JWT_EXPIRATION_DAYS * 24 * 3600
 
+    is_cloud = os.environ.get("CLOUD_DEPLOYMENT", "false").lower() == "true"
     response.set_cookie(
         key="access_token",
         value=token,
         max_age=max_age,
         httponly=True,
-        samesite="lax",
-        secure=False,  # Set to True when SSL/HTTPS is deployed
+        samesite="none" if is_cloud else "lax",
+        secure=is_cloud,  # True on HTTPS (Render/cloud), False on local HTTP
         path="/",
     )
 

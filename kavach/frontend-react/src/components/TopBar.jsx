@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import LockdownModal from './LockdownModal';
 
+const API_BASE = import.meta.env.VITE_API_BASE || '';
 const IS_CLOUD = import.meta.env.VITE_CLOUD_DEPLOYMENT === 'true';
+
 
 export default function TopBar({ sidebarCollapsed, onToggleSidebar }) {
 
@@ -65,7 +67,7 @@ export default function TopBar({ sidebarCollapsed, onToggleSidebar }) {
 
   // 2. Fetch initial firewall lockdown status
   useEffect(() => {
-    fetch('/shield/status')
+    fetch(`${API_BASE}/shield/status`)
       .then((res) => res.json())
       .then((data) => {
         setLockdownOn(Boolean(data.firewall?.active));
@@ -79,7 +81,7 @@ export default function TopBar({ sidebarCollapsed, onToggleSidebar }) {
       // Unlocking
       setIsLocking(true);
       try {
-        const response = await fetch('/shield/unlock?elevate=true', { method: 'POST' });
+        const response = await fetch(`${API_BASE}/shield/unlock?elevate=true`, { method: 'POST' });
         const data = await response.json().catch(() => ({}));
         if (data.success !== false) {
           setLockdownOn(false);
@@ -98,7 +100,7 @@ export default function TopBar({ sidebarCollapsed, onToggleSidebar }) {
     // Attempt standard lockdown or check if elevation permission is needed
     setIsLocking(true);
     try {
-      const response = await fetch('/shield/lockdown', { method: 'POST' });
+      const response = await fetch(`${API_BASE}/shield/lockdown`, { method: 'POST' });
       const data = await response.json().catch(() => ({}));
       if (data.requires_permission) {
         // Show interactive security permission modal
@@ -119,7 +121,7 @@ export default function TopBar({ sidebarCollapsed, onToggleSidebar }) {
   // 4. Called when user clicks "Grant Permission & Engage" inside LockdownModal
   const handleConfirmElevate = async () => {
     try {
-      const response = await fetch('/shield/lockdown?elevate=true', { method: 'POST' });
+      const response = await fetch(`${API_BASE}/shield/lockdown?elevate=true`, { method: 'POST' });
       const data = await response.json().catch(() => ({}));
       if (data.success && data.active) {
         setLockdownOn(true);

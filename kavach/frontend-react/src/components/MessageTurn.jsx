@@ -1,5 +1,7 @@
 import React, { useState, useMemo } from 'react';
 
+const API_BASE = import.meta.env.VITE_API_BASE || '';
+
 const MODEL_LABELS = {
   reasoning: 'Reasoning model',
   code: 'Code model',
@@ -789,7 +791,7 @@ function InteractiveCodeCard({ run, cIdx }) {
   const handleRunInSandbox = async () => {
     try {
       setIsRunning(true);
-      const res = await fetch('/code/run', {
+      const res = await fetch(`${API_BASE}/code/run`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

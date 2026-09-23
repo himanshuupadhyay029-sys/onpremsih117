@@ -22,9 +22,14 @@ import backend.db.models  # noqa: F401
 target_metadata = Base.metadata
 
 # Override sqlalchemy.url if DATABASE_URL is set in environment
-db_url = os.environ.get("DATABASE_URL")
-if db_url:
-    config.set_main_option("sqlalchemy.url", db_url)
+raw_db_url = os.environ.get("DATABASE_URL", "").strip().strip("\"'")
+if raw_db_url.startswith("DATABASE_URL="):
+    raw_db_url = raw_db_url.split("DATABASE_URL=", 1)[1].strip().strip("\"'")
+if raw_db_url.startswith("postgres://"):
+    raw_db_url = raw_db_url.replace("postgres://", "postgresql://", 1)
+
+if raw_db_url:
+    config.set_main_option("sqlalchemy.url", raw_db_url)
 
 
 def run_migrations_offline() -> None:

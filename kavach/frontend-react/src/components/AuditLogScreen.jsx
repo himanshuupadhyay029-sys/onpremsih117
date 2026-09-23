@@ -1,5 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 
+const API_BASE = import.meta.env.VITE_API_BASE || '';
+
+
 function formatDateTime(isoStr) {
   if (!isoStr) return '';
   try {
@@ -31,7 +34,7 @@ export default function AuditLogScreen({ user, onShowAuth }) {
       return;
     }
     try {
-      const res = await fetch('/audit', { credentials: 'include' });
+      const res = await fetch(`${API_BASE}/audit`, { credentials: 'include' });
       if (!res.ok) {
         if (res.status === 401) setEvents([]);
         return;

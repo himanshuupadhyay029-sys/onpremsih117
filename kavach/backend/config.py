@@ -55,7 +55,7 @@ OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434").rs
 # ──────────────────────────────────────────────────────────────────────────
 LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "ollama")  # "ollama" | "huggingface"
 CLOUD_DEPLOYMENT = os.environ.get("CLOUD_DEPLOYMENT", "false").lower() == "true"
-ENABLE_DOCKER_SANDBOX = os.environ.get("ENABLE_DOCKER_SANDBOX", "true").lower() == "true"
+ENABLE_DOCKER_SANDBOX = os.environ.get("ENABLE_DOCKER_SANDBOX", "false").lower() == "true"
 
 # ──────────────────────────────────────────────────────────────────────────
 # Hugging Face token pools — 3 tokens per role, for rotation on 429/503

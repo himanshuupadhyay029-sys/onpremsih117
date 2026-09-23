@@ -1,6 +1,8 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import MessageTurn from './MessageTurn';
 
+const API_BASE = import.meta.env.VITE_API_BASE || '';
+
 const GREETINGS = [
   "What can I help with today?",
   "What would you like to solve?",
@@ -120,7 +122,7 @@ export default function NewTaskScreen({
   const fetchVaultDocs = useCallback(async () => {
     try {
       setLoadingVaultDocs(true);
-      const res = await fetch('/knowledge/list', { credentials: 'include' });
+      const res = await fetch(`${API_BASE}/knowledge/list`, { credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
         setVaultDocs(data.documents || []);
@@ -344,7 +346,7 @@ export default function NewTaskScreen({
     formData.append('ingest', 'false');
 
     try {
-      const res = await fetch('/knowledge/upload', {
+      const res = await fetch(`${API_BASE}/knowledge/upload`, {
         method: 'POST',
         body: formData,
       });

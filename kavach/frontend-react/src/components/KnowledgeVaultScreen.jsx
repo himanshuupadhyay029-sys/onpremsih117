@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 
+const API_BASE = import.meta.env.VITE_API_BASE || '';
+
 export default function KnowledgeVaultScreen({ user, onShowAuth }) {
   const [documents, setDocuments] = useState([]);
   const [totalChunks, setTotalChunks] = useState(0);
@@ -19,7 +21,7 @@ export default function KnowledgeVaultScreen({ user, onShowAuth }) {
     }
     setLoading(true);
     try {
-      const res = await fetch('/knowledge/list', { credentials: 'include' });
+      const res = await fetch(`${API_BASE}/knowledge/list`, { credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
         setDocuments(data.documents || []);
@@ -63,7 +65,7 @@ export default function KnowledgeVaultScreen({ user, onShowAuth }) {
     formData.append('ingest', 'true');
 
     try {
-      const res = await fetch('/knowledge/upload', {
+      const res = await fetch(`${API_BASE}/knowledge/upload`, {
         method: 'POST',
         credentials: 'include',
         body: formData,

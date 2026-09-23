@@ -1,0 +1,63 @@
+services:
+  - type: web
+    name: kavach-backend
+    runtime: python
+    region: singapore          # closest to Neon ap-southeast-1
+    plan: free
+    rootDir: kavach            # subfolder within the repo
+    buildCommand: pip install -r requirements-cloud.txt
+    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+
+    envVars:
+      # ── Database (Neon) ────────────────────────────────────────────────────
+      - key: DATABASE_URL
+        value: postgresql://neondb_owner:npg_BxoYUp1sjS2K@ep-fancy-dew-azygk21r-pooler.c-3.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require
+
+      # ── Core deployment flags ──────────────────────────────────────────────
+      - key: LLM_PROVIDER
+        value: huggingface
+      - key: CLOUD_DEPLOYMENT
+        value: "true"
+      - key: ENABLE_DOCKER_SANDBOX
+        value: "false"
+
+      # ── Auth (REPLACE with a real random secret) ───────────────────────────
+      - key: JWT_SECRET_KEY
+        value: REPLACE_WITH_64_CHAR_RANDOM_SECRET
+
+      # ── Frontend CORS origin (set AFTER you get your Netlify URL) ─────────
+      - key: FRONTEND_ORIGIN
+        value: REPLACE_WITH_YOUR_NETLIFY_URL   # e.g. https://kavach-mrpl.netlify.app
+
+      # ── Hugging Face API keys — Reasoning role (3 accounts) ───────────────
+      - key: HF_REASONING_API_KEY_PRIMARY
+        value: REPLACE_WITH_HF_TOKEN
+      - key: HF_REASONING_API_KEY_FALLBACK_1
+        value: REPLACE_WITH_HF_TOKEN
+      - key: HF_REASONING_API_KEY_FALLBACK_2
+        value: REPLACE_WITH_HF_TOKEN
+
+      # ── Hugging Face API keys — Code role (3 accounts) ────────────────────
+      - key: HF_CODE_API_KEY_PRIMARY
+        value: REPLACE_WITH_HF_TOKEN
+      - key: HF_CODE_API_KEY_FALLBACK_1
+        value: REPLACE_WITH_HF_TOKEN
+      - key: HF_CODE_API_KEY_FALLBACK_2
+        value: REPLACE_WITH_HF_TOKEN
+
+      # ── Hugging Face API keys — Vision role (3 accounts) ──────────────────
+      - key: HF_VISION_API_KEY_PRIMARY
+        value: REPLACE_WITH_HF_TOKEN
+      - key: HF_VISION_API_KEY_FALLBACK_1
+        value: REPLACE_WITH_HF_TOKEN
+      - key: HF_VISION_API_KEY_FALLBACK_2
+        value: REPLACE_WITH_HF_TOKEN
+
+      # ── Hugging Face API keys — Embedding role (3 accounts) ───────────────
+      - key: HF_EMBEDDING_API_KEY_PRIMARY
+        value: REPLACE_WITH_HF_TOKEN
+      - key: HF_EMBEDDING_API_KEY_FALLBACK_1
+        value: REPLACE_WITH_HF_TOKEN
+      - key: HF_EMBEDDING_API_KEY_FALLBACK_2
+        value: REPLACE_WITH_HF_TOKEN
