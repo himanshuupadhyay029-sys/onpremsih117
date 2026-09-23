@@ -13,6 +13,7 @@ Limitations:
 
 import base64
 import logging
+import os
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
@@ -23,7 +24,10 @@ from backend import config
 
 logger = logging.getLogger("kavach.hf_client")
 
-HF_API_BASE = "https://api-inference.huggingface.co/models"
+HF_API_BASE = os.environ.get(
+    "HF_API_BASE",
+    "https://router.huggingface.co/hf-inference/models"
+).rstrip("/")
 _DEFAULT_TIMEOUT = 120.0  # seconds — HF can be slow, don't time out early
 
 
