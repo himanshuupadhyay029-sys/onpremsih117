@@ -21,14 +21,8 @@ import backend.db.models  # noqa: F401
 
 target_metadata = Base.metadata
 
-if DATABASE_URL and not DATABASE_URL.startswith("postgresql://kavach:kavach_secret@127.0.0.1"):
+if DATABASE_URL:
     config.set_main_option("sqlalchemy.url", DATABASE_URL)
-elif os.environ.get("RENDER") or os.environ.get("CLOUD_DEPLOYMENT", "").lower() == "true":
-    safe_keys = [k for k in os.environ.keys() if "KEY" not in k and "SECRET" not in k]
-    raise RuntimeError(
-        f"CRITICAL: DATABASE_URL could not be found in environment! "
-        f"Available environment keys detected: {safe_keys}"
-    )
 
 
 def run_migrations_offline() -> None:

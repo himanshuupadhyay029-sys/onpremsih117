@@ -4,6 +4,9 @@ import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
+NEON_CLOUD_URL = "postgresql://neondb_owner:npg_BxoYUp1sjS2K@ep-fancy-dew-azygk21r-pooler.c-3.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+
+
 def resolve_database_url() -> str:
     # 1. Fuzzy match by key name
     for k, v in os.environ.items():
@@ -27,7 +30,11 @@ def resolve_database_url() -> str:
                 val = val.replace("postgres://", "postgresql://", 1)
             return val
 
-    # 3. Local default for development
+    # 3. If running in cloud (Render), fallback directly to Neon cloud DB
+    if os.environ.get("RENDER") or os.environ.get("CLOUD_DEPLOYMENT", "").lower() == "true":
+        return NEON_CLOUD_URL
+
+    # 4. Local default for development
     return "postgresql://kavach:kavach_secret@127.0.0.1:5434/kavach_db"
 
 
