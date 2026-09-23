@@ -61,14 +61,21 @@ cors_origins = [
     "http://localhost:8000",
     "http://127.0.0.1:8000",
 ]
-frontend_origin = os.environ.get("FRONTEND_ORIGIN", "").strip()
+frontend_origin = os.environ.get("FRONTEND_ORIGIN", "").strip().rstrip("/")
 if frontend_origin:
-    cors_origins.append(frontend_origin)
+    cors_origins.extend([frontend_origin, f"{frontend_origin}/"])
+
+# Always allow official Netlify frontend URLs
+cors_origins.extend([
+    "https://kavach-frontend.netlify.app",
+    "https://kavach-frontend.netlify.app/",
+])
 
 # Explicit CORS configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=cors_origins,
+    allow_origins=list(set(cors_origins)),
+    allow_origin_regex=r"https://.*\.netlify\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
