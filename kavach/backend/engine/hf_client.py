@@ -45,17 +45,16 @@ def _role_from_model(model_id: str) -> str:
 
 
 def _call_with_rotation(model_id: str, payload: dict) -> Union[dict, list]:
-    """POST to HF Serverless API with token rotation.
-
-    Rotation logic:
-      - Try PRIMARY key first.
-      - 429 Too Many Requests -> rotate to next key.
-      - 503 Model Loading -> wait estimated_time (max 60s) -> retry same key once -> then rotate.
-      - 403 Forbidden -> raise immediately (ToS not accepted).
-      - All keys exhausted -> raise HFClientError.
-    """
+    """POST to HF Inference API with token and model rotation."""
     role = _role_from_model(model_id)
     keys = config.HF_KEYS.get(role, [])
+
+    # If this specific role has no keys set, pull keys from any other role
+    if not keys:
+        for r, k_list in config.HF_KEYS.items():
+            if k_list:
+                keys = k_list
+                break
 
     if not keys:
         raise HFClientError(
@@ -63,89 +62,109 @@ def _call_with_rotation(model_id: str, payload: dict) -> Union[dict, list]:
             f"Set HF_{role.upper()}_API_KEY_PRIMARY in environment variables."
         )
 
-    url = f"{HF_API_BASE}/{model_id}"
+    is_chat = "messages" in payload
+    candidate_models = [model_id]
+    if is_chat:
+        for alt in ["Qwen/Qwen2.5-7B-Instruct", "meta-llama/Llama-3.1-8B-Instruct", "mistralai/Mistral-7B-Instruct-v0.3"]:
+            if alt not in candidate_models:
+                candidate_models.append(alt)
+
     last_error = "unknown"
 
-    for i, key in enumerate(keys):
-        slot = "PRIMARY" if i == 0 else f"FALLBACK_{i}"
-        try:
-            logger.debug(f"[HF] {role}/{slot} -> {url}")
-            resp = httpx.post(
-                url,
-                json=payload,
-                headers={"Authorization": f"Bearer {key}"},
-                timeout=_DEFAULT_TIMEOUT,
-            )
+    for current_model in candidate_models:
+        if is_chat:
+            url = "https://router.huggingface.co/v1/chat/completions"
+            call_payload = dict(payload)
+            call_payload["model"] = current_model
+            # OpenAI API uses max_tokens, not max_new_tokens
+            if "max_new_tokens" in call_payload:
+                call_payload["max_tokens"] = call_payload.pop("max_new_tokens")
+        else:
+            url = f"{HF_API_BASE}/{current_model}"
+            call_payload = payload
 
-            if resp.status_code == 200:
-                return resp.json()
-
-            elif resp.status_code == 429:
-                logger.warning(f"[HF] {role}/{slot} -> 429 rate limited, rotating to next key")
-                last_error = f"Rate limited on {slot}"
-                continue
-
-            elif resp.status_code == 503:
-                body = resp.json() if resp.content else {}
-                wait_sec = min(float(body.get("estimated_time", 20)), 60)
-                logger.info(f"[HF] {role}/{slot} -> 503 model loading, waiting {wait_sec:.0f}s")
-                time.sleep(wait_sec)
-                # One retry on same key after the wait
-                resp2 = httpx.post(
+        for i, key in enumerate(keys):
+            slot = "PRIMARY" if i == 0 else f"FALLBACK_{i}"
+            try:
+                logger.debug(f"[HF] {role}/{slot} -> {url} (model={current_model})")
+                resp = httpx.post(
                     url,
-                    json=payload,
+                    json=call_payload,
                     headers={"Authorization": f"Bearer {key}"},
                     timeout=_DEFAULT_TIMEOUT,
                 )
-                if resp2.status_code == 200:
-                    return resp2.json()
-                logger.warning(f"[HF] {role}/{slot} still failing after wait, rotating")
-                last_error = f"503 model loading on {slot} (waited {wait_sec:.0f}s)"
+
+                if resp.status_code == 200:
+                    return resp.json()
+
+                elif resp.status_code == 429:
+                    logger.warning(f"[HF] {role}/{slot} -> 429 rate limited, rotating key")
+                    last_error = f"Rate limited on {slot}"
+                    continue
+
+                elif resp.status_code == 503:
+                    body = resp.json() if resp.content else {}
+                    wait_sec = min(float(body.get("estimated_time", 15)), 30)
+                    logger.info(f"[HF] {role}/{slot} -> 503 loading, waiting {wait_sec:.0f}s")
+                    time.sleep(wait_sec)
+                    resp2 = httpx.post(
+                        url,
+                        json=call_payload,
+                        headers={"Authorization": f"Bearer {key}"},
+                        timeout=_DEFAULT_TIMEOUT,
+                    )
+                    if resp2.status_code == 200:
+                        return resp2.json()
+                    last_error = f"503 model loading on {slot}"
+                    continue
+
+                elif resp.status_code in (400, 404):
+                    logger.warning(f"[HF] Model '{current_model}' returned {resp.status_code}: {resp.text[:160]}")
+                    last_error = f"Model '{current_model}' returned {resp.status_code}: {resp.text[:160]}"
+                    # Try next model candidate
+                    break
+
+                elif resp.status_code == 403:
+                    raise HFClientError(
+                        f"HF 403 Forbidden for model '{current_model}' using {slot} key. "
+                        f"Please visit https://huggingface.co/{current_model} and accept Terms of Service."
+                    )
+
+                else:
+                    last_error = f"HF error {resp.status_code}: {resp.text[:200]}"
+
+            except httpx.TimeoutException:
+                last_error = f"Timeout on {slot}"
                 continue
 
-            elif resp.status_code == 403:
-                raise HFClientError(
-                    f"HF 403 Forbidden for model '{model_id}' using {slot} key. "
-                    "The HF account associated with this token has NOT accepted this model's Terms of Service. "
-                    f"Fix: log into that HF account -> visit https://huggingface.co/{model_id} -> click 'Agree and access repository'."
-                )
-
-            else:
-                raise HFClientError(
-                    f"HF API error {resp.status_code} for role '{role}' ({slot}): {resp.text[:300]}"
-                )
-
-        except httpx.TimeoutException:
-            logger.warning(f"[HF] {role}/{slot} -> timed out after {_DEFAULT_TIMEOUT}s, rotating")
-            last_error = f"Timeout on {slot}"
-            continue
-
     raise HFClientError(
-        f"All HF keys exhausted for role '{role}' (tried {len(keys)} slot(s)). Last: {last_error}"
+        f"All HF keys/models exhausted for role '{role}'. Last error: {last_error}"
     )
 
 
 def _extract_text(result: Union[dict, list], prompt: str = "") -> str:
-    """Extract assistant text from HF response — handles multiple response formats."""
+    """Extract assistant text from HF response — handles OpenAI and raw formats."""
+    if isinstance(result, dict):
+        if "choices" in result and result["choices"]:
+            choice = result["choices"][0]
+            if isinstance(choice, dict):
+                if "message" in choice and isinstance(choice["message"], dict):
+                    return choice["message"].get("content", "").strip()
+                if "text" in choice:
+                    return choice.get("text", "").strip()
+        if "generated_text" in result:
+            return result["generated_text"].strip()
+
     if isinstance(result, list) and result:
         raw = result[0].get("generated_text", "")
         if isinstance(raw, list):
-            # Messages API: [{role, content}, ...] — get last assistant message
             for msg in reversed(raw):
                 if isinstance(msg, dict) and msg.get("role") == "assistant":
                     return msg.get("content", "").strip()
             return ""
-        # Text-generation format returns prompt + completion — strip prompt prefix
         if prompt and isinstance(raw, str) and raw.startswith(prompt):
             return raw[len(prompt):].strip()
         return raw.strip() if isinstance(raw, str) else str(raw)
-
-    if isinstance(result, dict):
-        if "choices" in result and result["choices"]:
-            # OpenAI-compatible chat completions format
-            return result["choices"][0]["message"]["content"].strip()
-        if "generated_text" in result:
-            return result["generated_text"].strip()
 
     return str(result)
 
@@ -155,17 +174,16 @@ def _extract_text(result: Union[dict, list], prompt: str = "") -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def generate(model: str, prompt: str, system: Optional[str] = None) -> str:
-    """Generate a completion. 'model' is a HF model ID from config.HF_MODELS.
-    Streaming is not supported on HF Serverless free tier — full response returned at once.
-    """
+    """Generate a completion using OpenAI-compatible chat API."""
     messages = []
     if system:
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": prompt})
 
     payload = {
+        "model": model,
         "messages": messages,
-        "max_new_tokens": 1024,
+        "max_tokens": 1024,
         "temperature": 0.7,
     }
     result = _call_with_rotation(model, payload)
@@ -173,10 +191,11 @@ def generate(model: str, prompt: str, system: Optional[str] = None) -> str:
 
 
 def chat(model: str, messages: List[Dict[str, str]]) -> str:
-    """Multi-turn chat with a list of {role, content} message dicts."""
+    """Multi-turn chat using OpenAI-compatible chat API."""
     payload = {
+        "model": model,
         "messages": messages,
-        "max_new_tokens": 1024,
+        "max_tokens": 1024,
         "temperature": 0.7,
     }
     result = _call_with_rotation(model, payload)
