@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import LockdownModal from './LockdownModal';
 
-const API_BASE = import.meta.env.VITE_API_BASE || '';
-const IS_CLOUD = import.meta.env.VITE_CLOUD_DEPLOYMENT === 'true';
+import { API_BASE, IS_CLOUD } from '../config';
 
 
 export default function TopBar({ sidebarCollapsed, onToggleSidebar }) {
@@ -29,10 +28,18 @@ export default function TopBar({ sidebarCollapsed, onToggleSidebar }) {
     let reconnectTimeout = null;
 
     const connect = () => {
-      const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const host = window.location.host;
+      let wsUrl;
+      if (API_BASE) {
+        const wsProto = API_BASE.startsWith('https') ? 'wss:' : 'ws:';
+        const cleanHost = API_BASE.replace(/^https?:\/\//, '').replace(/\/$/, '');
+        wsUrl = `${wsProto}//${cleanHost}/shield/monitor`;
+      } else {
+        const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        wsUrl = `${proto}//${window.location.host}/shield/monitor`;
+      }
+
       try {
-        socket = new WebSocket(`${proto}//${host}/shield/monitor`);
+        socket = new WebSocket(wsUrl);
 
         socket.onmessage = (event) => {
           try {

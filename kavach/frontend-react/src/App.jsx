@@ -6,8 +6,7 @@ import KnowledgeVaultScreen from './components/KnowledgeVaultScreen';
 import AuditLogScreen from './components/AuditLogScreen';
 import ModelSettingsScreen from './components/ModelSettingsScreen';
 import AuthModal from './components/AuthModal';
-
-const API_BASE = import.meta.env.VITE_API_BASE || '';
+import { API_BASE } from './config';
 
 
 export default function App() {

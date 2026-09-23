@@ -1,7 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import MessageTurn from './MessageTurn';
-
-const API_BASE = import.meta.env.VITE_API_BASE || '';
+import { API_BASE } from '../config';
 
 const GREETINGS = [
   "What can I help with today?",

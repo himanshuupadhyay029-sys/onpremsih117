@@ -1,6 +1,5 @@
 import React, { useState, useMemo } from 'react';
-
-const API_BASE = import.meta.env.VITE_API_BASE || '';
+import { API_BASE } from '../config';
 
 const MODEL_LABELS = {
   reasoning: 'Reasoning model',
