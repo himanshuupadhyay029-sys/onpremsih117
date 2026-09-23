@@ -4,22 +4,34 @@ import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-raw_db_url = (
-    os.environ.get("DATABASE_URL")
-    or os.environ.get("DATABASE_URL_POOLED")
-    or ""
-).strip().strip("\"'")
-if raw_db_url.startswith("DATABASE_URL="):
-    raw_db_url = raw_db_url.split("DATABASE_URL=", 1)[1].strip().strip("\"'")
-if raw_db_url.startswith("DATABASE_URL_POOLED="):
-    raw_db_url = raw_db_url.split("DATABASE_URL_POOLED=", 1)[1].strip().strip("\"'")
+def resolve_database_url() -> str:
+    # 1. Fuzzy match by key name
+    for k, v in os.environ.items():
+        clean_k = k.strip().upper()
+        if clean_k in ("DATABASE_URL", "DATABASE_URL_POOLED") or ("DATABASE" in clean_k and "URL" in clean_k):
+            val = (v or "").strip().strip("\"'").strip()
+            if val.startswith("DATABASE_URL="):
+                val = val.split("DATABASE_URL=", 1)[1].strip().strip("\"'")
+            if val.startswith("DATABASE_URL_POOLED="):
+                val = val.split("DATABASE_URL_POOLED=", 1)[1].strip().strip("\"'")
+            if val.startswith("postgres://"):
+                val = val.replace("postgres://", "postgresql://", 1)
+            if val:
+                return val
 
-if not raw_db_url:
-    raw_db_url = "postgresql://kavach:kavach_secret@127.0.0.1:5434/kavach_db"
-elif raw_db_url.startswith("postgres://"):
-    raw_db_url = raw_db_url.replace("postgres://", "postgresql://", 1)
+    # 2. Match any env var value starting with postgresql:// or postgres://
+    for k, v in os.environ.items():
+        val = (v or "").strip().strip("\"'").strip()
+        if val.startswith("postgresql://") or val.startswith("postgres://"):
+            if val.startswith("postgres://"):
+                val = val.replace("postgres://", "postgresql://", 1)
+            return val
 
-DATABASE_URL = raw_db_url
+    # 3. Local default for development
+    return "postgresql://kavach:kavach_secret@127.0.0.1:5434/kavach_db"
+
+
+DATABASE_URL = resolve_database_url()
 
 engine = create_engine(
     DATABASE_URL,
