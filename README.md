@@ -5,7 +5,6 @@
 [![Platform: Windows / Linux](https://img.shields.io/badge/Platform-Windows%2010%2F11%20%7C%20Linux-0078D4?style=flat-square&logo=windows)](https://github.com/himanshuupadhyay029-sys/onpremsih117)
 [![Hackathon: SIH 2026](https://img.shields.io/badge/Smart%20India%20Hackathon-SIH26117-FF6F00?style=flat-square)](https://github.com/himanshuupadhyay029-sys/onpremsih117)
 [![Organization: MRPL](https://img.shields.io/badge/Organization-Mangalore%20Refinery%20%26%20Petrochemicals%20Ltd-red?style=flat-square)](https://github.com/himanshuupadhyay029-sys/onpremsih117)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue?style=flat-square)](LICENSE)
 
 ---
 
@@ -268,9 +267,3 @@ onpremsih117/
 - **Target Organization:** Mangalore Refinery and Petrochemicals Limited (MRPL)
 - **Theme:** Smart Automation / Air-Gapped Industrial Security
 - **Core Mission:** Demonstrating that critical national infrastructure and refinery operations can achieve state-of-the-art autonomous AI assistance with **zero cloud dependencies and verifiable sovereign isolation**.
-
----
-
-## 📄 License
-
-This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) file for details.
