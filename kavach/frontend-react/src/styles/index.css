@@ -1996,7 +1996,26 @@ a:hover { color: var(--kavach-accent-hover); text-decoration: underline; }
   border-radius: 2px;
 }
 
-.chat-subitem {
+.chat-subitem-row {
+  display: flex;
+  align-items: center;
+  position: relative;
+  width: 100%;
+  border-radius: 7px;
+  transition: background var(--ease);
+}
+
+.chat-subitem-row:hover {
+  background: var(--bg-hover);
+}
+
+.chat-subitem-row.is-active {
+  background: rgba(79, 168, 216, 0.14);
+}
+
+.chat-subitem,
+.chat-subitem-main {
+  flex: 1;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -2012,14 +2031,67 @@ a:hover { color: var(--kavach-accent-hover); text-decoration: underline; }
   transition: background var(--ease), color var(--ease);
   min-width: 0;
 }
-.chat-subitem:hover {
-  background: var(--bg-hover);
+
+.chat-subitem-row .chat-subitem-main {
+  padding-right: 4px;
+  border-radius: 7px 0 0 7px;
+}
+
+.chat-subitem:hover,
+.chat-subitem-row:hover .chat-subitem-main {
   color: var(--text-primary);
 }
-.chat-subitem.is-active {
-  background: rgba(79, 168, 216, 0.14);
+
+.chat-subitem.is-active,
+.chat-subitem-row.is-active .chat-subitem-main {
   color: var(--kavach-accent);
   font-weight: 500;
+}
+
+.chat-subitem-delete-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin-right: 4px;
+  border-radius: 5px;
+  background: transparent;
+  border: none;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease, transform 0.15s ease;
+  flex-shrink: 0;
+}
+
+.chat-subitem-row:hover .chat-subitem-delete-btn,
+.chat-subitem-row:focus-within .chat-subitem-delete-btn {
+  opacity: 0.75;
+  visibility: visible;
+}
+
+.chat-subitem-delete-btn:hover {
+  opacity: 1 !important;
+  color: #ef4444 !important;
+  background: rgba(239, 68, 68, 0.14) !important;
+  transform: scale(1.08);
+}
+
+.chat-subitem-delete-btn svg {
+  width: 13.5px;
+  height: 13.5px;
+  stroke: currentColor;
+  stroke-width: 2;
+  fill: none;
+}
+
+@media (hover: none) {
+  .chat-subitem-delete-btn {
+    opacity: 0.65;
+    visibility: visible;
+  }
 }
 
 .chat-subitem-title {

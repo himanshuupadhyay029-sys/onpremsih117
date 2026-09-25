@@ -136,6 +136,32 @@ export default function App() {
     closeMobileNav();
   };
 
+  const [deletedChatId, setDeletedChatId] = useState(null);
+
+  const handleDeleteChat = async (chatId) => {
+    const res = await fetch(`${API_BASE}/chats/${encodeURIComponent(chatId)}`, {
+      method: 'DELETE',
+      credentials: 'include',
+    });
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.detail || `Server error (${res.status})`);
+    }
+
+    setChats((prev) => prev.filter((c) => c.id !== chatId));
+    setRunningChats((prev) => {
+      if (!prev[chatId]) return prev;
+      const next = { ...prev };
+      delete next[chatId];
+      return next;
+    });
+
+    if (activeChatId === chatId) {
+      setActiveChatId(null);
+    }
+    setDeletedChatId(chatId);
+  };
+
 
   return (
     <div className={`app ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${mobileNavOpen ? 'mobile-nav-open' : ''}`} id="app-root">
@@ -163,6 +189,7 @@ export default function App() {
         activeChatId={activeChatId}
         onNewChat={handleNewChat}
         onSelectChat={handleSelectChat}
+        onDeleteChat={handleDeleteChat}
         runningChats={runningChats}
       />
 
@@ -196,6 +223,7 @@ export default function App() {
                 onChatsUpdated={loadChats}
                 runningChats={runningChats}
                 setRunningChats={setRunningChats}
+                deletedChatId={deletedChatId}
               />
             </div>
 

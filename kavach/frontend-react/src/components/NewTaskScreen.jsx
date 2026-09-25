@@ -91,6 +91,7 @@ export default function NewTaskScreen({
   onChatsUpdated,
   runningChats,
   setRunningChats,
+  deletedChatId,
 }) {
   const [taskInput, setTaskInput] = useState('');
   const [attachedFiles, setAttachedFiles] = useState([]);
@@ -124,6 +125,22 @@ export default function NewTaskScreen({
   useEffect(() => {
     activeChatIdRef.current = activeChatId;
   }, [activeChatId]);
+
+  // Clean up in-memory session and active view if a chat is deleted
+  useEffect(() => {
+    if (!deletedChatId) return;
+    chatSessionsRef.current.delete(deletedChatId);
+    if (activeChatId === deletedChatId || lastLoadedChatIdRef.current === deletedChatId) {
+      lastLoadedChatIdRef.current = null;
+      setMessages([]);
+      setTaskInput('');
+      setAttachedFiles([]);
+      setTaggedVaultFiles([]);
+      setApprovalOutcome({});
+      setRunning(false);
+      setIsThinking(false);
+    }
+  }, [deletedChatId, activeChatId, setIsThinking]);
 
   // Fetch Knowledge Vault document list for @ mention autocomplete
   const fetchVaultDocs = useCallback(async () => {
