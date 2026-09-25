@@ -1123,6 +1123,7 @@ export default function NewTaskScreen({
                 </svg>
                 <span>Knowledge Vault Documents</span>
                 <span className="mention-hint-key">↑↓ to navigate · ↵ to select</span>
+                <span className="mention-hint-touch">Tap to select</span>
               </div>
               <div className="mention-popover-list">
                 {loadingVaultDocs && (

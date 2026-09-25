@@ -6,6 +6,8 @@ export default function Sidebar({
   isThinking,
   collapsed,
   onToggle,
+  mobileNavOpen,
+  onCloseMobile,
   user,
   onLogout,
   onShowAuth,
@@ -14,8 +16,13 @@ export default function Sidebar({
   onNewChat,
   onSelectChat,
 }) {
+  const handleToggle = () => {
+    if (onToggle) onToggle();
+    if (onCloseMobile) onCloseMobile();
+  };
+
   return (
-    <aside className="sidebar" id="sidebar">
+    <aside className={`sidebar ${mobileNavOpen ? 'is-mobile-open' : ''}`} id="sidebar">
       <div className="sidebar-head">
         <div className={`wordmark ${isThinking ? 'is-thinking' : ''}`} id="wordmark">
           <svg className="icon" viewBox="0 0 24 24">
@@ -25,7 +32,7 @@ export default function Sidebar({
         </div>
         <button
           className="sidebar-collapse-btn"
-          onClick={onToggle}
+          onClick={handleToggle}
           title="Close sidebar"
           aria-label="Close sidebar"
         >

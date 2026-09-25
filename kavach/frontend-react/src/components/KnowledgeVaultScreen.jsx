@@ -225,7 +225,8 @@ export default function KnowledgeVaultScreen({ user, onShowAuth }) {
           <polyline points="17 8 12 3 7 8" />
           <line x1="12" y1="3" x2="12" y2="15" />
         </svg>
-        <span>Drop files here or click to browse</span>
+        <span className="dropzone-text-desktop">Drop files here or click to browse</span>
+        <span className="dropzone-text-mobile">Tap to browse and upload documents</span>
         <span className="dropzone-hint">
           Supports .txt, .md, .pdf, .docx, and image files (.png, .jpg) via OCR
         </span>
@@ -260,13 +261,13 @@ export default function KnowledgeVaultScreen({ user, onShowAuth }) {
           documents.map((doc, idx) => {
             const fname = doc.filename || doc.source_filename || 'Document';
             return (
-              <div key={idx} className="doc-row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              <div key={idx} className="doc-row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', minWidth: 0, gap: '10px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden', minWidth: 0, flex: 1 }}>
                   <svg className="icon icon-sm" viewBox="0 0 24 24" style={{ flexShrink: 0 }}>
                     <path d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8l-5-5z" />
                     <path d="M14 3v5h5" />
                   </svg>
-                  <span className="doc-name" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <span className="doc-name" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>
                     {fname}
                   </span>
                 </div>

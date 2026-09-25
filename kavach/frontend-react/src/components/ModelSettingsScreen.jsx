@@ -1059,6 +1059,55 @@ export default function ModelSettingsScreen() {
         @keyframes spin {
           to { transform: rotate(360deg); }
         }
+
+        @media (max-width: 640px) {
+          .model-settings-screen {
+            padding: 1rem 0.75rem;
+          }
+          .settings-section {
+            padding: 1rem;
+            margin-bottom: 1.25rem;
+          }
+          .role-row {
+            flex-direction: column;
+            align-items: stretch;
+            gap: 0.5rem;
+          }
+          .role-label {
+            font-size: 0.9rem;
+          }
+          .role-select {
+            width: 100%;
+            font-size: 16px;
+          }
+          .model-search-bar {
+            flex-direction: column;
+          }
+          .model-input {
+            font-size: 16px;
+          }
+          .btn-secondary {
+            width: 100%;
+            justify-content: center;
+          }
+          .selected-summary-card {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 0.75rem;
+          }
+          .pull-action-area {
+            flex-direction: column;
+          }
+          .start-pull-btn, .stop-pull-btn {
+            width: 100%;
+            justify-content: center;
+          }
+          .progress-info-row {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 0.4rem;
+          }
+        }
       `}} />
     </div>
   );

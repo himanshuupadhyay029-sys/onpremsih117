@@ -4,7 +4,7 @@ import LockdownModal from './LockdownModal';
 import { API_BASE, IS_CLOUD } from '../config';
 
 
-export default function TopBar({ sidebarCollapsed, onToggleSidebar }) {
+export default function TopBar({ sidebarCollapsed, onToggleSidebar, mobileNavOpen, onOpenBriefing }) {
 
   const [externalCount, setExternalCount] = useState(null);
   const [monitorStatus, setMonitorStatus] = useState('Connecting to monitor…');
@@ -151,44 +151,40 @@ export default function TopBar({ sidebarCollapsed, onToggleSidebar }) {
   return (
     <header className="topbar">
       <div className="topbar-left">
-        {sidebarCollapsed && (
-          <button
-            className="sidebar-expand-btn"
-            onClick={onToggleSidebar}
-            title="Open sidebar"
-            aria-label="Open sidebar"
-          >
-            <svg className="icon" viewBox="0 0 24 24">
-              <rect x="3" y="4" width="18" height="16" rx="2" />
-              <path d="M9 4v16" />
-            </svg>
-          </button>
-        )}
-        {IS_CLOUD && (
-          <div style={{
-            background: 'rgba(251, 191, 36, 0.12)',
-            border: '1px solid rgba(251, 191, 36, 0.4)',
-            color: '#fbbf24',
-            fontSize: '0.72rem',
-            fontWeight: 500,
-            padding: '3px 10px',
-            borderRadius: '4px',
-            letterSpacing: '0.03em',
-            whiteSpace: 'nowrap',
-          }}>
-            ☁️ Cloud Demo — Sovereignty Shield &amp; Docker Sandbox are on-premises only
-          </div>
-        )}
+        <button
+          className={`sidebar-expand-btn ${sidebarCollapsed ? 'is-desktop-visible' : ''}`}
+          onClick={onToggleSidebar}
+          title={mobileNavOpen ? 'Close navigation' : 'Open navigation'}
+          aria-label="Toggle navigation menu"
+        >
+          <svg className="icon" viewBox="0 0 24 24">
+            <rect x="3" y="4" width="18" height="16" rx="2" />
+            <path d="M9 4v16" />
+          </svg>
+        </button>
+
+        <button
+          className="cloud-badge cloud-badge-btn"
+          onClick={onOpenBriefing}
+          title="Click to view SIH 117 Architectural Notice & On-Premises Verification"
+          id="sih-notice-btn"
+          type="button"
+        >
+          <span className="cloud-badge-full">☁️ SIH 117 Notice · On-Premises Mandate</span>
+          <span className="cloud-badge-compact">☁️ SIH 117</span>
+        </button>
       </div>
 
-
       <div className="topbar-right">
-        <div className="sovereignty" title="Live connection monitor">
+        <div className="sovereignty" title={`Live connection monitor: ${monitorStatus}`}>
           <span
             className={`dot ${isSafe ? 'is-safe' : ''} ${isAlert ? 'is-alert' : ''}`}
             id="sov-dot"
           />
-          <span id="sov-text">{monitorStatus}</span>
+          <span id="sov-text" className="sov-text-full">{monitorStatus}</span>
+          <span className="sov-text-compact">
+            {externalCount === null ? 'Connecting' : externalCount === 0 ? 'Air-gapped' : `${externalCount} ext`}
+          </span>
         </div>
 
         <button
@@ -201,7 +197,7 @@ export default function TopBar({ sidebarCollapsed, onToggleSidebar }) {
             <rect x="5" y="11" width="14" height="9" rx="2" />
             <path d="M8 11V8a4 4 0 118 0v3" />
           </svg>
-          <span>
+          <span className="lock-text-full">
             {isLocking
               ? lockdownOn
                 ? 'Unlocking…'
@@ -209,6 +205,9 @@ export default function TopBar({ sidebarCollapsed, onToggleSidebar }) {
               : lockdownOn
               ? 'Lockdown on'
               : 'Lockdown off'}
+          </span>
+          <span className="lock-text-compact">
+            {isLocking ? '…' : lockdownOn ? 'On' : 'Off'}
           </span>
         </button>
       </div>

@@ -6,6 +6,7 @@ import KnowledgeVaultScreen from './components/KnowledgeVaultScreen';
 import AuditLogScreen from './components/AuditLogScreen';
 import ModelSettingsScreen from './components/ModelSettingsScreen';
 import AuthModal from './components/AuthModal';
+import EvaluatorBriefingModal from './components/EvaluatorBriefingModal';
 import ErrorBoundary from './components/ErrorBoundary';
 import { API_BASE } from './config';
 
@@ -15,6 +16,11 @@ export default function App() {
   const [isThinking, setIsThinking] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     return localStorage.getItem('kavach_sidebar_collapsed') === '1';
+  });
+
+  // SIH 117 Evaluator Architecture Notice State
+  const [showBriefing, setShowBriefing] = useState(() => {
+    return !sessionStorage.getItem('kavach_briefing_seen');
   });
 
   // Auth state
@@ -55,6 +61,8 @@ export default function App() {
     })();
   }, []);
 
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+
   // Load chats when user is authenticated
   const loadChats = useCallback(async () => {
     if (!user) return;
@@ -74,11 +82,24 @@ export default function App() {
   }, [user, loadChats]);
 
   const toggleSidebar = () => {
-    setSidebarCollapsed((prev) => {
-      const next = !prev;
-      localStorage.setItem('kavach_sidebar_collapsed', next ? '1' : '0');
-      return next;
-    });
+    if (window.innerWidth <= 768) {
+      setMobileNavOpen((prev) => !prev);
+    } else {
+      setSidebarCollapsed((prev) => {
+        const next = !prev;
+        localStorage.setItem('kavach_sidebar_collapsed', next ? '1' : '0');
+        return next;
+      });
+    }
+  };
+
+  const closeMobileNav = useCallback(() => {
+    setMobileNavOpen(false);
+  }, []);
+
+  const handleSelectScreen = (screen) => {
+    setActiveScreen(screen);
+    closeMobileNav();
   };
 
   const handleAuthSuccess = (userData) => {
@@ -98,27 +119,41 @@ export default function App() {
     setUser(null);
     setChats([]);
     setActiveChatId(null);
+    closeMobileNav();
   };
 
   const handleNewChat = () => {
     setActiveChatId(null);
     setActiveScreen('task');
+    closeMobileNav();
   };
 
   const handleSelectChat = (chatId) => {
     setActiveChatId(chatId);
     setActiveScreen('task');
+    closeMobileNav();
   };
 
 
   return (
-    <div className={`app ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`} id="app-root">
+    <div className={`app ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${mobileNavOpen ? 'mobile-nav-open' : ''}`} id="app-root">
+      {/* Mobile Drawer Backdrop Scrim */}
+      {mobileNavOpen && (
+        <div
+          className="sidebar-backdrop"
+          onClick={closeMobileNav}
+          aria-label="Close navigation drawer"
+        />
+      )}
+
       <Sidebar
         activeScreen={activeScreen}
-        onSelectScreen={setActiveScreen}
+        onSelectScreen={handleSelectScreen}
         isThinking={isThinking}
         collapsed={sidebarCollapsed}
         onToggle={toggleSidebar}
+        mobileNavOpen={mobileNavOpen}
+        onCloseMobile={closeMobileNav}
         user={user}
         onLogout={handleLogout}
         onShowAuth={() => setShowAuthModal(true)}
@@ -132,6 +167,8 @@ export default function App() {
         <TopBar
           sidebarCollapsed={sidebarCollapsed}
           onToggleSidebar={toggleSidebar}
+          mobileNavOpen={mobileNavOpen}
+          onOpenBriefing={() => setShowBriefing(true)}
         />
 
         <div className={`screens ${activeScreen === 'task' ? 'screens-chat' : ''}`}>
@@ -169,6 +206,13 @@ export default function App() {
           onAuthSuccess={handleAuthSuccess}
         />
       )}
+
+      {/* SIH 117 Evaluator Architecture Briefing Gate */}
+      <EvaluatorBriefingModal
+        isOpen={showBriefing}
+        onClose={() => setShowBriefing(false)}
+        isFirstVisit={!sessionStorage.getItem('kavach_briefing_seen')}
+      />
     </div>
   );
 }
