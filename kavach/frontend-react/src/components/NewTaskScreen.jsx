@@ -89,6 +89,8 @@ export default function NewTaskScreen({
   setActiveChatId,
   onShowAuth,
   onChatsUpdated,
+  runningChats,
+  setRunningChats,
 }) {
   const [taskInput, setTaskInput] = useState('');
   const [attachedFiles, setAttachedFiles] = useState([]);
@@ -116,6 +118,12 @@ export default function NewTaskScreen({
   const startTimeRef = useRef(0);
 
   const lastLoadedChatIdRef = useRef(undefined);
+  const activeChatIdRef = useRef(activeChatId);
+  const chatSessionsRef = useRef(new Map());
+
+  useEffect(() => {
+    activeChatIdRef.current = activeChatId;
+  }, [activeChatId]);
 
   // Fetch Knowledge Vault document list for @ mention autocomplete
   const fetchVaultDocs = useCallback(async () => {
@@ -213,14 +221,48 @@ export default function NewTaskScreen({
       return;
     }
 
+    // Preserve previous chat state in session cache if available
+    const prevChatId = lastLoadedChatIdRef.current;
+    if (prevChatId) {
+      const prevSession = chatSessionsRef.current.get(prevChatId) || {};
+      chatSessionsRef.current.set(prevChatId, {
+        ...prevSession,
+        chatId: prevChatId,
+        messages,
+        taskInput,
+        attachedFiles,
+        taggedVaultFiles,
+        approvalOutcome,
+        running,
+      });
+    }
+
     lastLoadedChatIdRef.current = activeChatId;
 
-    // Reset turns and input state on session change
+    // Check if target chat has an in-memory session (e.g. running or cached)
+    if (activeChatId && chatSessionsRef.current.has(activeChatId)) {
+      const cached = chatSessionsRef.current.get(activeChatId);
+      setMessages(cached.messages || []);
+      setTaskInput(cached.taskInput || '');
+      setAttachedFiles(cached.attachedFiles || []);
+      setTaggedVaultFiles(cached.taggedVaultFiles || []);
+      setApprovalOutcome(cached.approvalOutcome || {});
+      const isChatRunning = Boolean(
+        runningChats?.[activeChatId]?.running || cached.running
+      );
+      setRunning(isChatRunning);
+      setIsThinking(isChatRunning);
+      return;
+    }
+
+    // Reset turns and input state on new/uncached session change
     setMessages([]);
     setTaskInput('');
     setAttachedFiles([]);
     setTaggedVaultFiles([]);
     setApprovalOutcome({});
+    setRunning(false);
+    setIsThinking(false);
 
     if (!activeChatId) {
       return;
@@ -234,6 +276,11 @@ export default function NewTaskScreen({
         if (res.ok && !cancelled) {
           const dbMsgs = await res.json();
           setMessages(dbMsgs);
+          chatSessionsRef.current.set(activeChatId, {
+            chatId: activeChatId,
+            messages: dbMsgs,
+            running: false,
+          });
         }
       } catch (err) {
         console.error('Failed to load chat messages:', err);
@@ -594,7 +641,7 @@ export default function NewTaskScreen({
   }, []);
 
 
-  // Run Task Execution with Optimistic UI Updates
+  // Run Task Execution with Optimistic UI Updates & Session Persistence
   const runTask = async (promptOverride = null) => {
     const task = (promptOverride || taskInput).trim();
     if (!task || running) return;
@@ -649,15 +696,42 @@ export default function NewTaskScreen({
       created_at: new Date().toISOString(),
     };
 
-    // Extract prior conversation history to send to backend
-    const priorHistory = messages
-      .filter((m) => !m.is_streaming && !m.is_error)
-      .map((m) => ({
-        role: m.role,
-        content: m.content || m.result || '',
-      }));
+    let sessionChatId = activeChatId || `temp-chat-${Date.now()}`;
 
-    // Optimistically append user message and streaming assistant turn immediately
+    // Helper: mutate session messages in cache and update UI if this chat is currently viewed
+    const updateSessionTurn = (updater) => {
+      const session = chatSessionsRef.current.get(sessionChatId);
+      if (session) {
+        session.messages = updater(session.messages || []);
+      }
+      if (
+        activeChatIdRef.current === sessionChatId ||
+        (!activeChatIdRef.current && sessionChatId.startsWith('temp-chat-'))
+      ) {
+        setMessages((prev) => updater(prev));
+      }
+    };
+
+    const sessionObj = {
+      chatId: sessionChatId,
+      taskId,
+      running: true,
+      messages: [...messages, userTurn, asstTurn],
+      taskInput: '',
+      attachedFiles: [],
+      taggedVaultFiles: [],
+      startTime: Date.now(),
+      statusText: 'Planning steps…',
+    };
+    chatSessionsRef.current.set(sessionChatId, sessionObj);
+
+    if (setRunningChats) {
+      setRunningChats((prev) => ({
+        ...prev,
+        [sessionChatId]: { running: true, statusText: 'Planning steps…', taskId },
+      }));
+    }
+
     setMessages((prev) => [...prev, userTurn, asstTurn]);
     setTaskInput('');
     setTaggedVaultFiles([]);
@@ -670,7 +744,7 @@ export default function NewTaskScreen({
     // Ticker for elapsed seconds
     tickerRef.current = setInterval(() => {
       const elapsed = Math.floor((Date.now() - startTimeRef.current) / 1000);
-      setMessages((prev) =>
+      updateSessionTurn((prev) =>
         prev.map((m) =>
           m.id === tempAsstId ? { ...m, statusText: `${m.statusText?.split(' (')[0] || 'Working…'} (${elapsed}s)` } : m
         )
@@ -685,16 +759,63 @@ export default function NewTaskScreen({
     }
     const eventSource = new EventSource(streamUrl, { withCredentials: true });
 
+    eventSource.addEventListener('chat_init', (e) => {
+      try {
+        const d = JSON.parse(e.data);
+        if (d.chat_id) {
+          const realChatId = d.chat_id;
+          const oldId = sessionChatId;
+          if (oldId !== realChatId) {
+            sessionChatId = realChatId;
+            const existing = chatSessionsRef.current.get(oldId) || sessionObj;
+            existing.chatId = realChatId;
+            chatSessionsRef.current.set(realChatId, existing);
+            chatSessionsRef.current.delete(oldId);
+
+            if (setRunningChats) {
+              setRunningChats((prev) => {
+                const next = { ...prev };
+                delete next[oldId];
+                next[realChatId] = {
+                  running: true,
+                  statusText: existing.statusText || 'Planning steps…',
+                  taskId,
+                };
+                return next;
+              });
+            }
+
+            if (activeChatIdRef.current === null || activeChatIdRef.current === oldId) {
+              lastLoadedChatIdRef.current = realChatId;
+              activeChatIdRef.current = realChatId;
+              setActiveChatId(realChatId);
+            }
+
+            if (onChatsUpdated) onChatsUpdated();
+          }
+        }
+      } catch (err) {
+        console.error('Failed to parse chat_init:', err);
+      }
+    });
+
     eventSource.addEventListener('plan', (e) => {
       try {
         const d = JSON.parse(e.data);
-        setMessages((prev) =>
+        const statusText = `Plan established: ${d.step_count} step(s)…`;
+        if (setRunningChats) {
+          setRunningChats((prev) => ({
+            ...prev,
+            [sessionChatId]: { running: true, statusText, taskId },
+          }));
+        }
+        updateSessionTurn((prev) =>
           prev.map((m) =>
             m.id === tempAsstId
               ? {
                   ...m,
                   steps: d.steps || [],
-                  statusText: `Plan established: ${d.step_count} step(s)…`,
+                  statusText,
                   modelMeta: d.model ? `Planner · ${d.model}` : m.modelMeta,
                 }
               : m
@@ -706,7 +827,14 @@ export default function NewTaskScreen({
     eventSource.addEventListener('step_start', (e) => {
       try {
         const d = JSON.parse(e.data);
-        setMessages((prev) =>
+        const statusText = `Step ${d.step_num}/${d.total_steps}: Executing [${d.tool}] with ${d.model}…`;
+        if (setRunningChats) {
+          setRunningChats((prev) => ({
+            ...prev,
+            [sessionChatId]: { running: true, statusText, taskId },
+          }));
+        }
+        updateSessionTurn((prev) =>
           prev.map((m) => {
             if (m.id !== tempAsstId) return m;
             const updatedSteps = (m.steps || []).map((s) =>
@@ -715,7 +843,7 @@ export default function NewTaskScreen({
             return {
               ...m,
               steps: updatedSteps,
-              statusText: `Step ${d.step_num}/${d.total_steps}: Executing [${d.tool}] with ${d.model}…`,
+              statusText,
             };
           })
         );
@@ -725,7 +853,7 @@ export default function NewTaskScreen({
     eventSource.addEventListener('tool_done', (e) => {
       try {
         const d = JSON.parse(e.data);
-        setMessages((prev) =>
+        updateSessionTurn((prev) =>
           prev.map((m) => {
             if (m.id !== tempAsstId) return m;
             const updatedSteps = (m.steps || []).map((s) =>
@@ -744,7 +872,7 @@ export default function NewTaskScreen({
     eventSource.addEventListener('observe', (e) => {
       try {
         const d = JSON.parse(e.data);
-        setMessages((prev) =>
+        updateSessionTurn((prev) =>
           prev.map((m) =>
             m.id === tempAsstId
               ? {
@@ -760,7 +888,7 @@ export default function NewTaskScreen({
     eventSource.addEventListener('replan', (e) => {
       try {
         const d = JSON.parse(e.data);
-        setMessages((prev) =>
+        updateSessionTurn((prev) =>
           prev.map((m) =>
             m.id === tempAsstId
               ? {
@@ -777,7 +905,7 @@ export default function NewTaskScreen({
     eventSource.addEventListener('revise', (e) => {
       try {
         const d = JSON.parse(e.data);
-        setMessages((prev) =>
+        updateSessionTurn((prev) =>
           prev.map((m) =>
             m.id === tempAsstId
               ? {
@@ -798,7 +926,7 @@ export default function NewTaskScreen({
     eventSource.addEventListener('clarify', (e) => {
       try {
         const d = JSON.parse(e.data);
-        setMessages((prev) =>
+        updateSessionTurn((prev) =>
           prev.map((m) =>
             m.id === tempAsstId
               ? {
@@ -818,13 +946,24 @@ export default function NewTaskScreen({
         eventSource.close();
         clearInterval(tickerRef.current);
 
-        if (data.chat_id && data.chat_id !== activeChatId) {
-          lastLoadedChatIdRef.current = data.chat_id;
-          setActiveChatId(data.chat_id);
+        const finalChatId = data.chat_id || sessionChatId;
+        if (
+          finalChatId &&
+          (activeChatIdRef.current === null || activeChatIdRef.current === sessionChatId)
+        ) {
+          lastLoadedChatIdRef.current = finalChatId;
+          activeChatIdRef.current = finalChatId;
+          setActiveChatId(finalChatId);
         }
-        if (onChatsUpdated) onChatsUpdated();
 
-        setMessages((prev) =>
+        const session =
+          chatSessionsRef.current.get(sessionChatId) ||
+          chatSessionsRef.current.get(finalChatId);
+        if (session) {
+          session.running = false;
+        }
+
+        updateSessionTurn((prev) =>
           prev.map((msg) => {
             if (msg.id === tempAsstId) {
               return {
@@ -870,21 +1009,49 @@ export default function NewTaskScreen({
             return msg;
           })
         );
+
+        if (onChatsUpdated) onChatsUpdated();
       } catch (err) {
         console.error('Error handling done_stream', err);
       } finally {
-        setRunning(false);
-        setIsThinking(false);
-        setAttachedFiles([]);
+        if (setRunningChats) {
+          setRunningChats((prev) => {
+            const next = { ...prev };
+            delete next[sessionChatId];
+            if (data?.chat_id) delete next[data.chat_id];
+            return next;
+          });
+        }
+        if (
+          activeChatIdRef.current === sessionChatId ||
+          activeChatIdRef.current === data?.chat_id
+        ) {
+          setRunning(false);
+          setIsThinking(false);
+          setAttachedFiles([]);
+        }
       }
     });
 
     eventSource.addEventListener('error', (e) => {
       eventSource.close();
       clearInterval(tickerRef.current);
-      setRunning(false);
-      setIsThinking(false);
-      setMessages((prev) =>
+      if (setRunningChats) {
+        setRunningChats((prev) => {
+          const next = { ...prev };
+          delete next[sessionChatId];
+          return next;
+        });
+      }
+      const session = chatSessionsRef.current.get(sessionChatId);
+      if (session) {
+        session.running = false;
+      }
+      if (activeChatIdRef.current === sessionChatId) {
+        setRunning(false);
+        setIsThinking(false);
+      }
+      updateSessionTurn((prev) =>
         prev.map((msg) =>
           msg.id === tempAsstId
             ? {

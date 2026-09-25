@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 
 export default function Sidebar({
   activeScreen,
@@ -15,7 +15,25 @@ export default function Sidebar({
   activeChatId,
   onNewChat,
   onSelectChat,
+  runningChats,
 }) {
+  const [recentChatsOpen, setRecentChatsOpen] = useState(() => {
+    return localStorage.getItem('kavach_recent_chats_open') !== '0';
+  });
+
+  const toggleRecentChats = (e) => {
+    e.stopPropagation();
+    setRecentChatsOpen((prev) => {
+      const next = !prev;
+      localStorage.setItem('kavach_recent_chats_open', next ? '1' : '0');
+      return next;
+    });
+  };
+
+  const hasAnyChatRunning = Boolean(
+    runningChats && Object.values(runningChats).some((rc) => rc?.running)
+  );
+
   const handleToggle = () => {
     if (onToggle) onToggle();
     if (onCloseMobile) onCloseMobile();
@@ -59,15 +77,79 @@ export default function Sidebar({
       )}
 
       <nav className="nav">
-        <button
-          className={`nav-item ${activeScreen === 'task' ? 'is-active' : ''}`}
-          onClick={() => onSelectScreen('task')}
-        >
-          <svg className="icon" viewBox="0 0 24 24">
-            <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
-          </svg>
-          <span>Chat</span>
-        </button>
+        {/* Chat group with nested recent chats dropdown */}
+        <div className="nav-chat-group">
+          <div className={`nav-item nav-item-chat ${activeScreen === 'task' ? 'is-active' : ''}`}>
+            <button
+              type="button"
+              className="nav-item-chat-main"
+              onClick={() => onSelectScreen('task')}
+              title="Open Chat"
+            >
+              <svg className="icon" viewBox="0 0 24 24">
+                <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
+              </svg>
+              <span>Chat</span>
+              {hasAnyChatRunning && (
+                <span className="nav-chat-running-beacon" title="Chat query is processing in the background" />
+              )}
+            </button>
+
+            {user && (
+              <button
+                type="button"
+                className={`chat-dropdown-toggle ${recentChatsOpen ? 'is-open' : ''}`}
+                onClick={toggleRecentChats}
+                title={recentChatsOpen ? 'Collapse recent chats' : 'Expand recent chats'}
+                aria-label={recentChatsOpen ? 'Collapse recent chats' : 'Expand recent chats'}
+              >
+                <svg className="icon icon-xs chevron-icon" viewBox="0 0 24 24">
+                  <path d="M6 9l6 6 6-6" />
+                </svg>
+              </button>
+            )}
+          </div>
+
+          {/* Collapsible Recent Chats Sub-list directly under Chat */}
+          {user && recentChatsOpen && (
+            <div className="chat-sublist" id="chat-sublist">
+              {chats && chats.length > 0 ? (
+                chats.map((chat) => {
+                  const isRunning = Boolean(runningChats?.[chat.id]?.running);
+                  const isSelected = activeScreen === 'task' && chat.id === activeChatId;
+
+                  return (
+                    <button
+                      key={chat.id}
+                      type="button"
+                      className={`chat-subitem ${isSelected ? 'is-active' : ''} ${isRunning ? 'is-running' : ''}`}
+                      onClick={() => onSelectChat(chat.id)}
+                      title={chat.title + (isRunning ? ' (Processing…)' : '')}
+                    >
+                      {isRunning ? (
+                        <span className="chat-running-indicator" title="Processing query…">
+                          <svg className="icon icon-xs icon-spin" viewBox="0 0 24 24" fill="none">
+                            <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2.5" strokeDasharray="28" strokeLinecap="round" />
+                          </svg>
+                        </span>
+                      ) : (
+                        <svg className="icon icon-xs" viewBox="0 0 24 24">
+                          <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
+                        </svg>
+                      )}
+                      <span className="chat-subitem-title">{chat.title}</span>
+                      {isRunning && (
+                        <span className="chat-running-pulse-dot" title="Running…" />
+                      )}
+                    </button>
+                  );
+                })
+              ) : (
+                <div className="chat-subitem-empty">No recent chats</div>
+              )}
+            </div>
+          )}
+        </div>
 
         <button
           className={`nav-item ${activeScreen === 'vault' ? 'is-active' : ''}`}
@@ -103,28 +185,6 @@ export default function Sidebar({
           <span>Model Settings</span>
         </button>
       </nav>
-
-      {/* Chat History List (visible when on 'task' screen and user is logged in) */}
-      {user && activeScreen === 'task' && chats && chats.length > 0 && (
-        <div className="chat-history" id="chat-history">
-          <div className="chat-history-label">Recent Chats</div>
-          <div className="chat-history-list">
-            {chats.map((chat) => (
-              <button
-                key={chat.id}
-                className={`chat-history-item ${chat.id === activeChatId ? 'is-active' : ''}`}
-                onClick={() => onSelectChat(chat.id)}
-                title={chat.title}
-              >
-                <svg className="icon icon-sm" viewBox="0 0 24 24">
-                  <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
-                </svg>
-                <span className="chat-history-title">{chat.title}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
 
       {/* User profile block or sign-in prompt */}
       <div className="sidebar-foot">

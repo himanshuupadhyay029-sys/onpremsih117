@@ -30,6 +30,7 @@ export default function App() {
 
   // Chat state with persistent selection
   const [chats, setChats] = useState([]);
+  const [runningChats, setRunningChats] = useState({});
   const [activeChatId, setActiveChatIdState] = useState(() => {
     return localStorage.getItem('kavach_active_chat_id') || null;
   });
@@ -118,6 +119,7 @@ export default function App() {
     }
     setUser(null);
     setChats([]);
+    setRunningChats({});
     setActiveChatId(null);
     closeMobileNav();
   };
@@ -161,6 +163,7 @@ export default function App() {
         activeChatId={activeChatId}
         onNewChat={handleNewChat}
         onSelectChat={handleSelectChat}
+        runningChats={runningChats}
       />
 
       <main className="main">
@@ -173,7 +176,17 @@ export default function App() {
 
         <div className={`screens ${activeScreen === 'task' ? 'screens-chat' : ''}`}>
           <ErrorBoundary>
-            {activeScreen === 'task' && (
+            {/* NewTaskScreen kept persistently mounted so in-flight queries & streams are never interrupted */}
+            <div
+              className="screen-pane screen-pane-task"
+              style={{
+                display: activeScreen === 'task' ? 'flex' : 'none',
+                flex: 1,
+                minHeight: 0,
+                height: '100%',
+                flexDirection: 'column',
+              }}
+            >
               <NewTaskScreen
                 setIsThinking={setIsThinking}
                 user={user}
@@ -181,21 +194,32 @@ export default function App() {
                 setActiveChatId={setActiveChatId}
                 onShowAuth={() => setShowAuthModal(true)}
                 onChatsUpdated={loadChats}
+                runningChats={runningChats}
+                setRunningChats={setRunningChats}
               />
-            )}
+            </div>
+
             {activeScreen === 'vault' && (
-              <KnowledgeVaultScreen
-                user={user}
-                onShowAuth={() => setShowAuthModal(true)}
-              />
+              <div className="screen-pane screen-pane-vault" style={{ flex: 1, minHeight: 0, height: '100%' }}>
+                <KnowledgeVaultScreen
+                  user={user}
+                  onShowAuth={() => setShowAuthModal(true)}
+                />
+              </div>
             )}
             {activeScreen === 'audit' && (
-              <AuditLogScreen
-                user={user}
-                onShowAuth={() => setShowAuthModal(true)}
-              />
+              <div className="screen-pane screen-pane-audit" style={{ flex: 1, minHeight: 0, height: '100%' }}>
+                <AuditLogScreen
+                  user={user}
+                  onShowAuth={() => setShowAuthModal(true)}
+                />
+              </div>
             )}
-            {activeScreen === 'models' && <ModelSettingsScreen />}
+            {activeScreen === 'models' && (
+              <div className="screen-pane screen-pane-models" style={{ flex: 1, minHeight: 0, height: '100%' }}>
+                <ModelSettingsScreen />
+              </div>
+            )}
           </ErrorBoundary>
         </div>
       </main>

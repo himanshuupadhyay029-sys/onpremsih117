@@ -400,6 +400,17 @@ async def run_stream(
     chat_db_title = chat.title if chat else None
     user_id_str = str(current_user.id) if current_user else None
 
+    if chat_db_id:
+        emit_sync(
+            task_id,
+            "chat_init",
+            {
+                "chat_id": chat_db_id,
+                "chat_title": chat_db_title,
+                "task_id": task_id,
+            },
+        )
+
     def _execute_worker():
         worker_db = SessionLocal()
         try:
