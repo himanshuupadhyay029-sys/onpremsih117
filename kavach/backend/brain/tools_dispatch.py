@@ -46,6 +46,8 @@ def _extract_key_facts(tool: str, output: str, meta: Dict[str, Any], is_error: b
     if is_error:
         facts[f"last_error_{tool}"] = output[:300]
         return facts
+    else:
+        facts[f"last_error_{tool}"] = None
 
     if tool == "calc":
         if meta.get("calc_result") is not None:
@@ -135,9 +137,13 @@ def dispatch_tool(
         role = routing_dec.get("model_role", "reasoning")
         model = registry.get_model(role)
         actor = model
-        llm_prompt = injected_input
-        if state.get("history_context"):
-            llm_prompt = f"{state['history_context']}\nUser query: {injected_input}"
+        system_intro = (
+            "You are KAVACH, an autonomous on-premises industrial operations assistant. "
+            "Provide a direct, helpful, and professional response to the operator. "
+            "If the operator greets you, respond politely and concisely."
+        )
+        history_part = f"\n\n{state['history_context']}" if state.get("history_context") else ""
+        llm_prompt = f"{system_intro}{history_part}\n\nUser: {injected_input}\nAssistant:"
         try:
             output = ollama.generate(model, llm_prompt)
             if not output.strip():

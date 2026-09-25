@@ -275,10 +275,20 @@ def _format_history(history: Optional[List[dict]]) -> str:
     for msg in recent:
         role = (msg.get("role") or "user").capitalize()
         content = (msg.get("content") or "").strip()
+        if not content:
+            continue
+        content_lower = content.lower()
+        if (
+            content.startswith("[error]")
+            or "cannot connect to local ollama" in content_lower
+            or "ollama serve" in content_lower
+            or "ollama isn't running" in content_lower
+            or "the task encountered an error" in content_lower
+        ):
+            continue
         if len(content) > MAX_HISTORY_CHARS_PER_MSG:
             content = content[:MAX_HISTORY_CHARS_PER_MSG - 3] + "..."
-        if content:
-            lines.append(f"{role}: {content}")
+        lines.append(f"{role}: {content}")
     if not lines:
         return ""
     return "Prior Conversation Context:\n" + "\n".join(lines) + "\n"
@@ -730,7 +740,11 @@ def execute_node(state: AgentState) -> dict:
     new_facts = dispatch_res.get("key_facts", {})
 
     accumulated_key_facts = dict(state.get("key_facts") or {})
-    accumulated_key_facts.update(new_facts)
+    for k, v in new_facts.items():
+        if v is None:
+            accumulated_key_facts.pop(k, None)
+        else:
+            accumulated_key_facts[k] = v
 
     elapsed = time.perf_counter() - t0
     log_node_exit("executor", state.get("task_id"), status="ERROR" if is_error else "OK", elapsed_s=elapsed, summary=f"Step {step['step_num']} [{tool}] via '{actor}'")
@@ -866,6 +880,29 @@ def observe_node(state: AgentState) -> dict:
 
     step_input_val = str(last_output.get("input") or "")
     output_text = str(last_output.get("output") or "")
+
+    # Fast completion for single-step conversational or standalone LLM turns
+    if total_steps == 1 and last_output.get("tool") == "llm" and not is_error:
+        action = "done"
+        reasoning = "Direct LLM conversational response completed."
+        observe_decision = {
+            "action": "done",
+            "reasoning": reasoning,
+            "new_steps": [],
+            "retry_instruction": "",
+            "clarify_question": "",
+        }
+        trace_entries.append({"role": "thought", "content": "Conversational response completed."})
+        emit_sync(
+            state.get("task_id"),
+            "observe",
+            {"task_id": state.get("task_id"), "action": "done", "reasoning": reasoning, "status": "complete"},
+        )
+        return {
+            "trace": trace_entries,
+            "status": "complete",
+            "observe_decision": observe_decision,
+        }
 
     # Check for missing parameters that require human clarification on current step
     needs_clarification = bool(
@@ -1366,7 +1403,7 @@ def finalize_node(state: AgentState) -> dict:
         f"Sub-Task {o['step_num']} ({o['tool']}): {o['output']}" for o in deduped_outputs
     )
 
-    if len(deduped_outputs) == 1 and deduped_outputs[0]["tool"] in ("search", "document", "calc") and not deduped_outputs[0].get("error"):
+    if len(deduped_outputs) == 1 and deduped_outputs[0]["tool"] in ("search", "document", "calc", "llm", "excel", "ppt") and not deduped_outputs[0].get("error"):
         final_answer = deduped_outputs[0]["output"]
         thought = {"role": "thought", "content": "Sub-task completed directly with verified tool output."}
     else:

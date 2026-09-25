@@ -190,14 +190,33 @@ def run(
                     .order_by(Message.created_at.asc())
                     .all()
                 )
-            history = [{"role": m.role, "content": m.content} for m in db_msgs]
+            history = []
+            for m in db_msgs:
+                c = (m.content or "").strip()
+                c_lower = c.lower()
+                if (
+                    c.startswith("[error]")
+                    or "cannot connect to local ollama" in c_lower
+                    or "ollama serve" in c_lower
+                    or "ollama isn't running" in c_lower
+                    or "the task encountered an error" in c_lower
+                ):
+                    continue
+                history.append({"role": m.role, "content": c})
             if chat.agent_memory:
-                initial_key_facts = dict(chat.agent_memory)
+                initial_key_facts = {
+                    k: v for k, v in dict(chat.agent_memory).items()
+                    if not k.startswith("last_error_") and v is not None
+                }
         except Exception as exc:
             print(f"[WARN] Failed to load history: {exc}", flush=True)
 
     if not history and req.history:
-        history = req.history
+        history = [
+            h for h in req.history
+            if not str(h.get("content", "")).startswith("[error]")
+            and "cannot connect to local ollama" not in str(h.get("content", "")).lower()
+        ]
 
     user_id_str = str(current_user.id) if current_user else None
     agent_res = run_agent(
