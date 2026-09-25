@@ -317,6 +317,8 @@ def retrieve(
                 "chunk_index": rank,
                 "score": item.get("rerank_score", 1.0),
                 "is_parent_expanded": item.get("is_parent_expanded", False),
+                "chunk_id": item.get("chunk_id"),
+                "parent_id": item.get("parent_id"),
             }
         )
 

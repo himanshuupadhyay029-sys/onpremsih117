@@ -12,7 +12,10 @@ from backend.engine.prompts import CODING_SYSTEM_PROMPT, REASONING_SYSTEM_PROMPT
 
 class OllamaError(RuntimeError):
     """Raised when Ollama is unreachable or returns an error."""
-    pass
+
+    def __init__(self, message: str, status_code: Optional[int] = None):
+        super().__init__(message)
+        self.status_code = status_code
 
 
 # Global tracking of active pulls: model_name -> httpx.AsyncClient
@@ -20,11 +23,19 @@ active_pulls: Dict[str, httpx.AsyncClient] = {}
 
 
 
-def _get_client(timeout: float = 120.0) -> httpx.Client:
-    return httpx.Client(base_url=config.OLLAMA_BASE_URL, timeout=timeout)
+def _get_client(timeout: float = 120.0, headers: Optional[Dict[str, str]] = None) -> httpx.Client:
+    return httpx.Client(base_url=config.OLLAMA_BASE_URL, timeout=timeout, headers=headers)
 
 
-def generate(model: str, prompt: str, system: Optional[str] = None) -> str:
+def generate(
+    model: str,
+    prompt: str,
+    system: Optional[str] = None,
+    *,
+    options: Optional[Dict[str, Any]] = None,
+    response_format: Optional[str] = None,
+    headers: Optional[Dict[str, str]] = None,
+) -> str:
     """Generates completion text from a local Ollama model without streaming.
     - If system is explicitly provided, it is used.
     - If model is a coding specialist (e.g. granite / coder), CODING_SYSTEM_PROMPT is used.
@@ -47,9 +58,13 @@ def generate(model: str, prompt: str, system: Optional[str] = None) -> str:
     }
     if active_system:
         payload["system"] = active_system
+    if options:
+        payload["options"] = options
+    if response_format:
+        payload["format"] = response_format
 
     try:
-        with _get_client(timeout=120.0) as client:
+        with _get_client(timeout=120.0, headers=headers) as client:
             resp = client.post("/api/generate", json=payload)
             resp.raise_for_status()
             data = resp.json()
@@ -68,7 +83,10 @@ def generate(model: str, prompt: str, system: Optional[str] = None) -> str:
             "Please ensure Ollama is running (`ollama serve`)."
         ) from exc
     except httpx.HTTPStatusError as exc:
-        raise OllamaError(f"Ollama returned HTTP error: {exc.response.status_code} - {exc.response.text}") from exc
+        raise OllamaError(
+            f"Ollama returned HTTP error: {exc.response.status_code} - {exc.response.text}",
+            status_code=exc.response.status_code,
+        ) from exc
     except Exception as exc:
         raise OllamaError(f"Ollama generation failed: {exc}") from exc
 
@@ -103,14 +121,14 @@ def chat(model: str, messages: List[Dict[str, str]]) -> str:
         raise OllamaError(f"Ollama chat call failed: {exc}") from exc
 
 
-def embed(model: str, text: str) -> List[float]:
+def embed(model: str, text: str, *, headers: Optional[Dict[str, str]] = None) -> List[float]:
     """Generates vector embeddings for a given text using a local embedding model."""
     payload: Dict[str, Any] = {
         "model": model,
         "prompt": text,
     }
     try:
-        with _get_client(timeout=120.0) as client:
+        with _get_client(timeout=120.0, headers=headers) as client:
             resp = client.post("/api/embeddings", json=payload)
             resp.raise_for_status()
             data = resp.json()
@@ -121,12 +139,15 @@ def embed(model: str, text: str) -> List[float]:
             "Please ensure Ollama is running (`ollama serve`)."
         ) from exc
     except httpx.HTTPStatusError as exc:
-        raise OllamaError(f"Ollama returned HTTP error: {exc.response.status_code} - {exc.response.text}") from exc
+        raise OllamaError(
+            f"Ollama returned HTTP error: {exc.response.status_code} - {exc.response.text}",
+            status_code=exc.response.status_code,
+        ) from exc
     except Exception as exc:
         raise OllamaError(f"Ollama embedding failed: {exc}") from exc
 
 
-def embed_batch(model: str, texts: List[str]) -> List[List[float]]:
+def embed_batch(model: str, texts: List[str], *, headers: Optional[Dict[str, str]] = None) -> List[List[float]]:
     """Generates vector embeddings for multiple texts.
     Attempts modern Ollama /api/embed batch endpoint first, falling back to sequential /api/embeddings.
     """
@@ -139,7 +160,7 @@ def embed_batch(model: str, texts: List[str]) -> List[List[float]]:
         "input": texts,
     }
     try:
-        with _get_client(timeout=180.0) as client:
+        with _get_client(timeout=180.0, headers=headers) as client:
             resp = client.post("/api/embed", json=batch_payload)
             if resp.status_code == 200:
                 data = resp.json()
@@ -155,7 +176,7 @@ def embed_batch(model: str, texts: List[str]) -> List[List[float]]:
         # Fallback to single-chunk embedding if /api/embed fails or endpoint not present
         pass
 
-    return [embed(model, t) for t in texts]
+    return [embed(model, t, headers=headers) for t in texts]
 
 
 def vision(model: str, prompt: str, image_path: Union[str, Path], system: Optional[str] = None) -> str:

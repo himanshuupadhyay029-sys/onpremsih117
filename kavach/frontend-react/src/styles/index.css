@@ -2792,3 +2792,57 @@ a:hover { color: var(--kavach-accent-hover); text-decoration: underline; }
 
 
 
+
+/* ------------------------------------------------------- rag evaluation -- */
+
+.evaluation-card { padding: 14px 18px; }
+.evaluation-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.evaluation-header .section-label { margin: 0; }
+.evaluation-status {
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+}
+.evaluation-status-failed { color: var(--status-alert); }
+.evaluation-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+.evaluation-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-page);
+}
+.evaluation-metric-label {
+  font-size: 11.5px;
+  color: var(--text-secondary);
+}
+.evaluation-metric-value {
+  font-size: 18px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+.evaluation-tone-good .evaluation-metric-value { color: var(--status-safe); }
+.evaluation-tone-fair .evaluation-metric-value { color: #B7862B; }
+.evaluation-tone-poor .evaluation-metric-value { color: var(--status-alert); }
+.evaluation-running .evaluation-metric-value,
+.evaluation-not_applicable .evaluation-metric-value { color: var(--text-tertiary); }
+.evaluation-failed .evaluation-metric-value {
+  font-size: 13px;
+  line-height: 27px;
+  color: var(--status-alert);
+}
+@media (max-width: 720px) {
+  .evaluation-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

@@ -30,6 +30,7 @@ from backend.auth.routes import router as auth_router, get_optional_user, get_cu
 from backend.brain.agent import run_agent
 from backend.brain.event_bus import emit_sync, register_task, unregister_task
 from backend.chat.routes import router as chat_router
+from backend.evaluation.evaluation_service import complete_evaluation, evaluate_agent_result, prepare_evaluation
 from backend.db.models import AgentRun, Chat, Message, User
 from backend.db.session import get_db, SessionLocal
 from sqlalchemy import func
@@ -228,7 +229,7 @@ def run(
         user_id=user_id_str,
         vault_files=req.vault_files,
     )
-
+    agent_res["evaluation"] = evaluate_agent_result(agent_res, user_id=user_id_str, vault_files=req.vault_files)
 
     task_id_str = agent_res.get("task_id") or req.task_id or str(uuid.uuid4())
     if agent_res.get("state_snapshot"):
@@ -264,6 +265,7 @@ def run(
                     "routing_decision": agent_res.get("routing_decision"),
                     "clarify_question": agent_res.get("clarify_question"),
                     "key_facts": agent_res.get("key_facts"),
+                    "evaluation": agent_res.get("evaluation"),
                 },
             )
             db.add(asst_msg)
@@ -399,6 +401,11 @@ async def run_stream(
                 user_id=user_id_str,
                 vault_files=parsed_vault_files or None,
             )
+            evaluation_state, evaluation_input = prepare_evaluation(
+                res, user_id=user_id_str, vault_files=parsed_vault_files or None
+            )
+            res["evaluation"] = evaluation_state
+            asst_msg_id = None
 
             if chat_db_id:
                 try:
@@ -431,12 +438,14 @@ async def run_stream(
                                 "routing_decision": res.get("routing_decision"),
                                 "clarify_question": res.get("clarify_question"),
                                 "key_facts": res.get("key_facts"),
+                                "evaluation": evaluation_state,
                             },
                         )
                         worker_db.add(asst_msg)
 
                         c.updated_at = func.now()
                         worker_db.commit()
+                        asst_msg_id = asst_msg.id
                 except Exception as exc:
                     print(f"[ERROR] Worker failed DB persist: {exc}", flush=True)
 
@@ -469,6 +478,28 @@ async def run_stream(
             emit_sync(task_id, "done_stream", res)
         except Exception as exc:
             emit_sync(task_id, "error", {"error": str(exc)})
+            worker_db.close()
+            return
+
+        # The answer has been delivered; evaluation runs afterwards and can never turn it into an error.
+        try:
+            if evaluation_input is not None:
+                final_evaluation = complete_evaluation(
+                    evaluation_input,
+                    on_event=lambda name, payload: emit_sync(task_id, name, payload),
+                    task_id=task_id,
+                )
+                if asst_msg_id is not None:
+                    try:
+                        m = worker_db.query(Message).filter(Message.id == asst_msg_id).first()
+                        if m:
+                            meta = dict(m.meta or {})
+                            meta["evaluation"] = final_evaluation
+                            m.meta = meta
+                            worker_db.commit()
+                    except Exception as exc:
+                        print(f"[ERROR] Worker failed to persist evaluation: {exc}", flush=True)
+                emit_sync(task_id, "evaluation_done", final_evaluation)
         finally:
             worker_db.close()
 
@@ -487,7 +518,9 @@ async def run_stream(
                 event_data = event.get("data", {})
                 yield f"event: {event_name}\ndata: {json.dumps(event_data)}\n\n"
 
-                if event_name in ("done_stream", "error"):
+                if event_name in ("error", "evaluation_done"):
+                    break
+                if event_name == "done_stream" and (event_data.get("evaluation") or {}).get("status") != "running":
                     break
         finally:
             unregister_task(task_id)
@@ -539,7 +572,7 @@ def reply_to_agent(
         resume_state=snapshot,
         user_id=user_id_str,
     )
-
+    res["evaluation"] = evaluate_agent_result(res, user_id=user_id_str, vault_files=snapshot.get("vault_files"))
 
     _AGENT_RUNS_CACHE[task_id] = res.get("state_snapshot", {})
 
@@ -585,6 +618,7 @@ def reply_to_agent(
                 "models_used": res.get("models_used", []),
                 "routing_decision": res.get("routing_decision"),
                 "key_facts": res.get("key_facts"),
+                "evaluation": res.get("evaluation"),
             },
         )
         db.add(asst_msg)

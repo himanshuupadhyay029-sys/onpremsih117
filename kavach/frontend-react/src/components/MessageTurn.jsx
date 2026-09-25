@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import EvaluationPanel from './EvaluationPanel.jsx';
 
 const MODEL_LABELS = {
   reasoning: 'Reasoning model',
@@ -625,6 +626,8 @@ export default function MessageTurn({
             </div>
           </div>
         )}
+
+        <EvaluationPanel evaluation={turn.evaluation || meta.evaluation} />
 
         {/* Generated Code Execution Cards (Consolidated & Interactive) */}
         {codeRuns.map((run, cIdx) => (

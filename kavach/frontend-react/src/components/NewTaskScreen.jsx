@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import MessageTurn from './MessageTurn';
+import { applyEvaluationEvent } from '../utils/evaluation.js';
 
 const GREETINGS = [
   "What can I help with today?",
@@ -683,6 +684,17 @@ export default function NewTaskScreen({
       });
     }
     const eventSource = new EventSource(streamUrl);
+    let answerDelivered = false;
+
+    const updateEvaluation = (eventName, payload) => {
+      setMessages((prev) =>
+        prev.map((m) => {
+          if (m.id !== tempAsstId) return m;
+          const evaluation = applyEvaluationEvent(m.evaluation, eventName, payload);
+          return { ...m, evaluation, meta: { ...(m.meta || {}), evaluation } };
+        })
+      );
+    };
 
     eventSource.addEventListener('plan', (e) => {
       try {
@@ -814,7 +826,8 @@ export default function NewTaskScreen({
     eventSource.addEventListener('done_stream', (e) => {
       try {
         const data = JSON.parse(e.data);
-        eventSource.close();
+        answerDelivered = true;
+        if (data.evaluation?.status !== 'running') eventSource.close();
         clearInterval(tickerRef.current);
 
         if (data.chat_id && data.chat_id !== activeChatId) {
@@ -842,6 +855,7 @@ export default function NewTaskScreen({
                 approval: data.approval || null,
                 draft_content: data.draft_content || null,
                 trace: data.trace || [],
+                evaluation: data.evaluation || null,
                 modelMeta:
                   data.models_used && data.models_used.length > 1
                     ? `Models · ${data.models_used.join(' → ')}`
@@ -863,6 +877,7 @@ export default function NewTaskScreen({
                   routing_decision: data.routing_decision,
                   clarify_question: data.clarify_question,
                   key_facts: data.key_facts,
+                  evaluation: data.evaluation || null,
                 },
               };
             }
@@ -878,8 +893,28 @@ export default function NewTaskScreen({
       }
     });
 
+    ['evaluation_stage', 'evaluation_metric'].forEach((eventName) => {
+      eventSource.addEventListener(eventName, (e) => {
+        try {
+          updateEvaluation(eventName, JSON.parse(e.data));
+        } catch {}
+      });
+    });
+
+    eventSource.addEventListener('evaluation_done', (e) => {
+      eventSource.close();
+      try {
+        updateEvaluation('evaluation_done', JSON.parse(e.data));
+      } catch {}
+    });
+
     eventSource.addEventListener('error', (e) => {
       eventSource.close();
+      if (answerDelivered) {
+        // The answer is already shown; only the evaluation stream was cut short.
+        updateEvaluation('connection_lost', {});
+        return;
+      }
       clearInterval(tickerRef.current);
       setRunning(false);
       setIsThinking(false);
@@ -943,6 +978,7 @@ export default function NewTaskScreen({
                 statusText: data.status === 'complete' ? 'Completed' : `Status: ${data.status}`,
                 steps: data.steps || data.plan || m.steps,
                 trace: data.trace || m.trace,
+                evaluation: data.evaluation || null,
                 meta: {
                   ...m.meta,
                   clarify_question: null,
@@ -950,6 +986,7 @@ export default function NewTaskScreen({
                   steps: data.steps || data.plan || [],
                   step_outputs: data.step_outputs || [],
                   key_facts: data.key_facts || {},
+                  evaluation: data.evaluation || null,
                 },
               }
             : m

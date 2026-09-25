@@ -109,6 +109,8 @@ def search(
                 "breadcrumb": breadcrumb,
                 "excerpt": r["chunk_text"],
                 "score": r.get("score", 1.0),
+                "chunk_id": r.get("chunk_id"),
+                "parent_id": r.get("parent_id"),
             }
         )
 

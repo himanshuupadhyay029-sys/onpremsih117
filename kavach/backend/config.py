@@ -48,3 +48,21 @@ def get_user_audit_log_path(user_id: str = None) -> Path:
 # Local Ollama endpoint (strictly offline/local)
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
 
+
+def get_user_sources_dir(user_id: str = None) -> Path:
+    """Returns the user's directory of normalized full-document texts persisted at ingestion."""
+    key = str(user_id).strip() if user_id else "default"
+    sources_dir = KNOWLEDGE_DIR / "users" / key / "sources"
+    sources_dir.mkdir(parents=True, exist_ok=True)
+    return sources_dir
+
+
+# RAG evaluation layer (single master toggle; everything else has safe defaults)
+ENABLE_EVALUATION = os.environ.get("ENABLE_EVALUATION", "false").strip().lower() in {"1", "true", "yes", "on"}
+# Comma-separated bearer keys for an authenticated on-prem model gateway. Empty = keyless local Ollama.
+EVALUATION_API_KEYS = [k.strip() for k in os.environ.get("EVALUATION_API_KEYS", "").split(",") if k.strip()]
+EVALUATION_KEY_COOLDOWN_SECONDS = float(os.environ.get("EVALUATION_KEY_COOLDOWN_SECONDS", "30"))
+EVALUATION_MAX_RETRIES = int(os.environ.get("EVALUATION_MAX_RETRIES", "3"))
+EVALUATION_NUM_CTX = int(os.environ.get("EVALUATION_NUM_CTX", "16384"))
+EVALUATION_MAX_SOURCE_CHARS = int(os.environ.get("EVALUATION_MAX_SOURCE_CHARS", "48000"))
+

@@ -23,6 +23,7 @@ from backend import config
 from backend.audit.logbook import log_event
 from backend.engine import ollama, registry
 from backend.vault.bm25 import BM25Index
+from backend.vault.source_store import delete_source_text, save_source_text
 
 _lock = threading.Lock()
 
@@ -338,6 +339,7 @@ def ingest_document(file_path: Union[str, Path], user_id: Optional[str] = None) 
         bm25 = BM25Index().build(all_corpus_texts)
 
         _save_all_indices(index, metadata, bm25, user_id=user_id)
+        save_source_text(file_path.name, text, user_id=user_id)
 
     log_event(
         event_type="ingest",
@@ -426,6 +428,10 @@ def delete_document(filename: str, user_id: Optional[str] = None) -> Dict:
                 upload_file.unlink()
             except Exception:
                 pass
+        try:
+            delete_source_text(filename, user_id=user_id)
+        except Exception:
+            pass
 
         log_event(
             event_type="delete",
