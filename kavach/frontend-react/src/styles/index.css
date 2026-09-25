@@ -3618,3 +3618,17 @@ a:hover { color: var(--kavach-accent-hover); text-decoration: underline; }
     max-width: 100%;
   }
 }
+
+/* Suppress Netlify Badge & Drawer injection */
+#netlify-badge,
+.netlify-badge,
+[data-netlify-badge],
+iframe[src*="netlify"],
+netlify-drawer,
+div[class*="netlify-drawer"],
+div[id*="netlify-drawer"] {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
