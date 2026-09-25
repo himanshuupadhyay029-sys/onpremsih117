@@ -941,12 +941,13 @@ export default function NewTaskScreen({
     });
 
     eventSource.addEventListener('done_stream', (e) => {
+      let finalChatId = sessionChatId;
       try {
         const data = JSON.parse(e.data);
         eventSource.close();
         clearInterval(tickerRef.current);
 
-        const finalChatId = data.chat_id || sessionChatId;
+        finalChatId = data.chat_id || sessionChatId;
         if (
           finalChatId &&
           (activeChatIdRef.current === null || activeChatIdRef.current === sessionChatId)
@@ -1018,13 +1019,13 @@ export default function NewTaskScreen({
           setRunningChats((prev) => {
             const next = { ...prev };
             delete next[sessionChatId];
-            if (data?.chat_id) delete next[data.chat_id];
+            if (finalChatId) delete next[finalChatId];
             return next;
           });
         }
         if (
           activeChatIdRef.current === sessionChatId ||
-          activeChatIdRef.current === data?.chat_id
+          activeChatIdRef.current === finalChatId
         ) {
           setRunning(false);
           setIsThinking(false);
