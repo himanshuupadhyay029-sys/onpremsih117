@@ -253,8 +253,16 @@ def _save_all_indices(index, metadata: List[Dict], bm25: BM25Index, user_id: Opt
     bm25.save(bm25_path)
 
 
-def ingest_document(file_path: Union[str, Path], user_id: Optional[str] = None) -> Dict:
-    """Ingests a single document into Two-Tier Hierarchical FAISS + BM25 indices for a user."""
+def ingest_document(
+    file_path: Union[str, Path],
+    user_id: Optional[str] = None,
+    department: str = "general",
+    classification_level: str = "internal",
+) -> Dict:
+    """Ingests a single document into Two-Tier Hierarchical FAISS + BM25 indices for a user.
+    
+    Also records metadata (department, classification_level) in the documents table.
+    """
     file_path = Path(file_path)
     if file_path.suffix.lower() not in SUPPORTED_EXTENSIONS:
         raise ValueError(
@@ -340,17 +348,47 @@ def ingest_document(file_path: Union[str, Path], user_id: Optional[str] = None) 
         _save_all_indices(index, metadata, bm25, user_id=user_id)
 
     log_event(
-        event_type="ingest",
+        event_type="document_ingested",
         actor="vault",
-        summary=f"Hierarchically ingested '{file_path.name}': {len(parent_sections)} parents, {len(all_new_child_entries)} child chunks",
+        summary=f"Hierarchically ingested '{file_path.name}': {len(parent_sections)} parents, {len(all_new_child_entries)} child chunks (dept={department}, class={classification_level})",
         metadata={
             "source_filename": file_path.name,
             "parent_count": len(parent_sections),
             "child_chunk_count": len(all_new_child_entries),
+            "department": department,
+            "classification_level": classification_level,
         },
         external_calls=0,
         user_id=user_id,
     )
+
+    # Record metadata in documents table for RBAC-scoped retrieval
+    try:
+        from backend.db.session import SessionLocal
+        from backend.db.models import Document
+        import uuid as _uuid
+        db = SessionLocal()
+        try:
+            existing = db.query(Document).filter(
+                Document.owner_user_id == _uuid.UUID(str(user_id)) if user_id else Document.owner_user_id.is_(None),
+                Document.filename == file_path.name,
+            ).first()
+            if existing:
+                existing.department = department
+                existing.classification_level = classification_level
+            else:
+                doc_meta = Document(
+                    owner_user_id=_uuid.UUID(str(user_id)) if user_id else _uuid.uuid4(),
+                    filename=file_path.name,
+                    department=department,
+                    classification_level=classification_level,
+                )
+                db.add(doc_meta)
+            db.commit()
+        finally:
+            db.close()
+    except Exception as exc:
+        print(f"[Warning] Failed to record document metadata in DB: {exc}", flush=True)
 
     return {
         "source_filename": file_path.name,

@@ -332,17 +332,40 @@ def dispatch_tool(
             sources = structured.get("sources", [])
 
             is_code_doc = any(po.get("tool") in ("code", "calc") for po in state.get("step_outputs", [])) or "code" in str(state.get("shared_memory", "")).lower()
+            task_dept = "general"
+            if prior_sources:
+                for ps in prior_sources:
+                    if isinstance(ps, dict) and ps.get("department"):
+                        task_dept = ps["department"]
+                        break
+            uid_str = state.get("user_id")
+            if task_dept == "general" and uid_str:
+                try:
+                    from backend.db.session import SessionLocal
+                    from backend.db.models import User
+                    _db = SessionLocal()
+                    try:
+                        _u = _db.query(User).filter(User.id == uuid.UUID(str(uid_str))).first()
+                        if _u and _u.department:
+                            task_dept = _u.department
+                    finally:
+                        _db.close()
+                except Exception:
+                    pass
+
             if is_code_doc:
                 risk_info = {
                     "risk": "low",
                     "confidence": 0.95,
                     "reasoning": "Technical summary document generated from in-session verified code execution results.",
+                    "department": task_dept,
                 }
             else:
                 risk_info = assess_risk(
                     task_type="document",
                     document_content=structured,
                     sources_used=prior_sources if is_doc_grounded else [],
+                    department=task_dept,
                 )
 
             if risk_info.get("risk") in {"medium", "high"}:
@@ -352,6 +375,8 @@ def dispatch_tool(
                     document_content=structured,
                     risk_assessment=risk_info,
                     sources=prior_sources if is_doc_grounded else [],
+                    department=task_dept,
+                    user_id=uid_str,
                 )
                 output = (
                     f"Drafted document '{title}' (Risk: {risk_info['risk'].upper()}, "

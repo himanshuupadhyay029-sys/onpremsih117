@@ -394,6 +394,19 @@ export default function MessageTurn({
                 · Confidence:{' '}
                 {approval.confidence !== undefined ? Math.round(approval.confidence * 100) : 50}%
               </span>
+              <span style={{
+                marginLeft: '8px',
+                padding: '2px 7px',
+                borderRadius: '4px',
+                fontSize: '11px',
+                fontWeight: '600',
+                textTransform: 'uppercase',
+                background: 'rgba(99, 102, 241, 0.15)',
+                color: '#818cf8',
+                border: '1px solid rgba(99, 102, 241, 0.3)',
+              }}>
+                Dept: {approval.department || 'general'}
+              </span>
             </div>
             <div className="approval-reasoning">
               {approval.reasoning || 'Document generation paused for human review.'}
@@ -419,31 +432,69 @@ export default function MessageTurn({
 
             {!approvalOutcome[turn.task_id || meta.task_id] && !editingApproval && (
               <div className="approval-actions">
-                <button
-                  className="btn btn-primary"
-                  onClick={() => onApprovalAction && onApprovalAction(turn.task_id || meta.task_id, 'approve')}
-                >
-                  <svg className="icon icon-sm" viewBox="0 0 24 24">
-                    <path d="M20 6L9 17l-5-5" />
-                  </svg>
-                  <span>Approve</span>
-                </button>
-                <button className="btn btn-secondary" onClick={handleStartEdit}>
-                  <svg className="icon icon-sm" viewBox="0 0 24 24">
-                    <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
-                    <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
-                  </svg>
-                  <span>Edit</span>
-                </button>
-                <button
-                  className="btn btn-danger-quiet"
-                  onClick={() => onApprovalAction && onApprovalAction(turn.task_id || meta.task_id, 'reject')}
-                >
-                  <svg className="icon icon-sm" viewBox="0 0 24 24">
-                    <path d="M18 6L6 18M6 6l12 12" />
-                  </svg>
-                  <span>Reject</span>
-                </button>
+                {(() => {
+                  const targetDept = approval.department || 'general';
+                  const isAuthorized = user && (
+                    user.role === 'admin' ||
+                    (user.role === 'approver' && (targetDept === 'general' || user.department === targetDept))
+                  );
+
+                  if (isAuthorized) {
+                    return (
+                      <>
+                        <button
+                          className="btn btn-primary"
+                          onClick={() => onApprovalAction && onApprovalAction(turn.task_id || meta.task_id, 'approve')}
+                        >
+                          <svg className="icon icon-sm" viewBox="0 0 24 24">
+                            <path d="M20 6L9 17l-5-5" />
+                          </svg>
+                          <span>Approve</span>
+                        </button>
+                        <button className="btn btn-secondary" onClick={handleStartEdit}>
+                          <svg className="icon icon-sm" viewBox="0 0 24 24">
+                            <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
+                            <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
+                          </svg>
+                          <span>Edit</span>
+                        </button>
+                        <button
+                          className="btn btn-danger-quiet"
+                          onClick={() => onApprovalAction && onApprovalAction(turn.task_id || meta.task_id, 'reject')}
+                        >
+                          <svg className="icon icon-sm" viewBox="0 0 24 24">
+                            <path d="M18 6L6 18M6 6l12 12" />
+                          </svg>
+                          <span>Reject</span>
+                        </button>
+                      </>
+                    );
+                  }
+
+                  return (
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      fontSize: '12px',
+                      color: 'var(--text-muted, #94a3b8)',
+                      background: 'rgba(255, 255, 255, 0.04)',
+                      padding: '8px 12px',
+                      borderRadius: '6px',
+                      border: '1px solid rgba(255, 255, 255, 0.08)',
+                      width: '100%',
+                    }}>
+                      <svg className="icon icon-sm" viewBox="0 0 24 24" style={{ color: '#eab308', flexShrink: 0 }}>
+                        <circle cx="12" cy="12" r="10" stroke="currentColor" fill="none" strokeWidth="2" />
+                        <path d="M12 8v4M12 16h.01" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                      </svg>
+                      <span>
+                        Awaiting sign-off by {targetDept !== 'general' ? `${targetDept} approver` : 'an authorized approver'} or admin.
+                        {user?.role ? ` (You are logged in as ${user.role}${user.department ? ` / ${user.department}` : ''})` : ' (Sign in as an approver to decide)'}
+                      </span>
+                    </div>
+                  );
+                })()}
               </div>
             )}
 

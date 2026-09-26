@@ -17,12 +17,15 @@ import faiss
 import numpy as np
 
 import time
-from backend.audit.logbook import get_current_user_id
+from backend.audit.logbook import get_current_user_id, log_event
+from backend.db.models import Document
+from backend.db.session import SessionLocal
 from backend.engine import ollama, registry
 from backend.terminal_logger import log_tool
 from backend.vault.bm25 import BM25Index
 from backend.vault.ingest import get_user_paths
 from backend.vault.rerank import rerank as cross_encoder_rerank
+import uuid
 
 
 logger = logging.getLogger("kavach.retrieve")
@@ -215,6 +218,8 @@ def retrieve(
     rerank_threshold: float = 0.35,
     user_id: Optional[str] = None,
     target_files: Optional[List[str]] = None,
+    requester_role: str = "engineer",
+    requester_department: str = "general",
 ) -> List[Dict]:
     """Executes the full hybrid retrieval pipeline:
 
@@ -326,4 +331,66 @@ def retrieve(
         f"Searched {index.ntotal} vectors + BM25 -> {len(packed_results)} chunks selected (fused={len(fused_candidates)})",
         elapsed_s=time.perf_counter() - t0,
     )
+
+    # ── RBAC Filtering ── cross-reference source filenames against documents table
+    if formatted_chunks and user_id:
+        try:
+            db = SessionLocal()
+            try:
+                uid = uuid.UUID(str(user_id))
+                source_filenames = list({c["source_filename"] for c in formatted_chunks})
+                doc_rows = db.query(Document).filter(
+                    Document.owner_user_id == uid,
+                    Document.filename.in_(source_filenames),
+                ).all()
+                doc_meta_map = {d.filename: d for d in doc_rows}
+            finally:
+                db.close()
+
+            pre_filter_count = len(formatted_chunks)
+            filtered = []
+            for chunk in formatted_chunks:
+                fname = chunk["source_filename"]
+                doc = doc_meta_map.get(fname)
+
+                # Documents not in the metadata table are treated as general/internal (legacy)
+                if doc is None:
+                    filtered.append(chunk)
+                    continue
+
+                # Rule 1: department mismatch -> drop unless admin/auditor
+                if doc.department != requester_department and requester_role not in ("admin", "auditor"):
+                    continue
+
+                # Rule 2: restricted classification -> drop unless (approver|admin) AND department matches
+                if doc.classification_level == "restricted":
+                    if requester_role not in ("approver", "admin"):
+                        continue
+                    if requester_role == "approver" and doc.department != requester_department:
+                        continue
+
+                filtered.append(chunk)
+
+            if len(filtered) == 0 and pre_filter_count > 0:
+                # Matches existed but were all filtered by RBAC — audit the denial
+                log_event(
+                    event_type="access_denied",
+                    actor="vault_rbac",
+                    summary=f"Retrieval for query returned {pre_filter_count} match(es) but all were filtered by RBAC (role={requester_role}, dept={requester_department})",
+                    metadata={
+                        "query": query[:200],
+                        "pre_filter_count": pre_filter_count,
+                        "requester_role": requester_role,
+                        "requester_department": requester_department,
+                        "blocked_files": list({c["source_filename"] for c in formatted_chunks}),
+                    },
+                    external_calls=0,
+                    user_id=user_id,
+                )
+
+            formatted_chunks = filtered
+        except Exception as exc:
+            # RBAC filter failure must not crash retrieval — log and return unfiltered
+            print(f"[Warning] RBAC filter failed: {exc}", flush=True)
+
     return formatted_chunks

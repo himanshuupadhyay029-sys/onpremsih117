@@ -64,40 +64,40 @@ export default function LockdownModal({ isOpen, onClose, onConfirmLockdown }) {
           </p>
         </div>
 
-        <div className="lockdown-modal-body" style={{ fontSize: '0.875rem', lineHeight: '1.5', color: 'var(--text-muted, #94a3b8)', marginBottom: '20px' }}>
-          <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px', padding: '12px', marginBottom: '14px' }}>
-            <div style={{ fontWeight: '600', color: 'var(--text, #f1f5f9)', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+        <div className="lockdown-modal-body" style={{ fontSize: '0.875rem', lineHeight: '1.5', color: '#475569', marginBottom: '20px' }}>
+          <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px', marginBottom: '14px' }}>
+            <div style={{ fontWeight: '600', color: '#0f172a', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
               <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', background: '#10b981' }}></span>
               What this action does:
             </div>
-            <ul style={{ margin: '0', paddingLeft: '18px' }}>
+            <ul style={{ margin: '0', paddingLeft: '18px', color: '#334155' }}>
               <li>Flips Windows Defender Firewall outbound policy to <strong>Block</strong>.</li>
               <li>Instantly cuts off all external internet traffic to guarantee sovereign air-gap isolation.</li>
               <li>Localhost connections (KAVACH UI, FastAPI, Ollama LLM) remain 100% active.</li>
             </ul>
           </div>
 
-          <p style={{ margin: '0 0 8px 0' }}>
+          <p style={{ margin: '0 0 8px 0', color: '#334155' }}>
             Windows requires Administrator privileges to modify firewall rules. When you click <strong>Grant Permission</strong>, Windows will display a <strong>User Account Control (UAC)</strong> prompt on your screen asking:
           </p>
-          <div style={{ background: 'rgba(56, 189, 248, 0.08)', borderLeft: '3px solid #38bdf8', padding: '8px 12px', borderRadius: '4px', color: '#e2e8f0', fontSize: '0.82rem', fontStyle: 'italic' }}>
+          <div style={{ background: '#f0f9ff', borderLeft: '3px solid #0284c7', padding: '8px 12px', borderRadius: '4px', color: '#0369a1', fontSize: '0.82rem', fontStyle: 'italic' }}>
             "Do you want to allow this app to make changes to your device?" → Please click <strong>Yes</strong>.
           </div>
 
           {errorMessage && (
-            <div style={{ marginTop: '14px', padding: '10px 12px', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.25)', borderRadius: '6px', color: '#fca5a5', fontSize: '0.82rem' }}>
+            <div style={{ marginTop: '14px', padding: '10px 12px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '6px', color: '#b91c1c', fontSize: '0.82rem' }}>
               <div style={{ fontWeight: '600', marginBottom: '4px' }}>Permission Notice</div>
               {errorMessage}
-              <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+              <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid #fecaca' }}>
                 <span>Or run this one-time command in an elevated PowerShell:</span>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '4px' }}>
-                  <code style={{ background: '#0f172a', padding: '4px 6px', borderRadius: '4px', fontSize: '0.75rem', flex: 1, overflowX: 'auto' }}>
+                  <code style={{ background: '#0f172a', color: '#f8fafc', padding: '4px 6px', borderRadius: '4px', fontSize: '0.75rem', flex: 1, overflowX: 'auto' }}>
                     {manualCommand}
                   </code>
                   <button
                     type="button"
                     onClick={copyCommand}
-                    style={{ background: 'var(--surface-light, #334155)', border: 'none', color: '#fff', padding: '4px 8px', borderRadius: '4px', cursor: 'pointer', fontSize: '0.75rem' }}
+                    style={{ background: '#334155', border: 'none', color: '#fff', padding: '4px 8px', borderRadius: '4px', cursor: 'pointer', fontSize: '0.75rem' }}
                   >
                     {copied ? 'Copied!' : 'Copy'}
                   </button>
@@ -110,10 +110,10 @@ export default function LockdownModal({ isOpen, onClose, onConfirmLockdown }) {
         <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '12px' }}>
           <button
             type="button"
-            className="auth-switch-btn"
+            className="btn btn-secondary"
             onClick={onClose}
             disabled={isElevating}
-            style={{ padding: '8px 16px', borderRadius: '6px', background: 'transparent', border: '1px solid rgba(255,255,255,0.15)', color: 'var(--text-muted, #94a3b8)', cursor: 'pointer' }}
+            style={{ padding: '8px 16px', borderRadius: '6px' }}
           >
             Cancel
           </button>

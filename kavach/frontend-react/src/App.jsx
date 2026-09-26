@@ -5,6 +5,8 @@ import NewTaskScreen from './components/NewTaskScreen';
 import KnowledgeVaultScreen from './components/KnowledgeVaultScreen';
 import AuditLogScreen from './components/AuditLogScreen';
 import ModelSettingsScreen from './components/ModelSettingsScreen';
+import UserManagementScreen from './components/UserManagementScreen';
+import ApprovalsScreen from './components/ApprovalsScreen';
 import AuthModal from './components/AuthModal';
 
 const API_BASE = '';
@@ -156,7 +158,58 @@ export default function App() {
               onShowAuth={() => setShowAuthModal(true)}
             />
           )}
-          {activeScreen === 'models' && <ModelSettingsScreen />}
+          {activeScreen === 'approvals' && (
+            (user?.role === 'approver' || user?.role === 'admin') ? (
+              <ApprovalsScreen
+                user={user}
+                onShowAuth={() => setShowAuthModal(true)}
+                onSelectChat={(chatId) => {
+                  setActiveChatId(chatId);
+                  setActiveScreen('task');
+                }}
+              />
+            ) : (
+              <section className="screen">
+                <div className="screen-head">
+                  <h2 className="screen-title">Access Restricted</h2>
+                  <p className="screen-sub">
+                    Supervisory approval center is restricted to department approvers and administrators.
+                    Your current role: <strong>{user?.role || 'engineer'}</strong>
+                  </p>
+                </div>
+              </section>
+            )
+          )}
+          {activeScreen === 'models' && (
+            user?.role === 'admin' ? (
+              <ModelSettingsScreen />
+            ) : (
+              <section className="screen">
+                <div className="screen-head">
+                  <h2 className="screen-title">Access Restricted</h2>
+                  <p className="screen-sub">
+                    Model management is restricted to administrators.
+                    Your current role: <strong>{user?.role || 'engineer'}</strong>
+                  </p>
+                </div>
+              </section>
+            )
+          )}
+          {activeScreen === 'users' && (
+            user?.role === 'admin' ? (
+              <UserManagementScreen user={user} />
+            ) : (
+              <section className="screen">
+                <div className="screen-head">
+                  <h2 className="screen-title">Access Restricted</h2>
+                  <p className="screen-sub">
+                    User management is restricted to administrators.
+                    Your current role: <strong>{user?.role || 'engineer'}</strong>
+                  </p>
+                </div>
+              </section>
+            )
+          )}
 
         </div>
       </main>
