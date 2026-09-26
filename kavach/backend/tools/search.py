@@ -73,7 +73,33 @@ def search(
 ) -> Dict:
     t0 = time.perf_counter()
     log_tool("vault", "SEARCH", f"Query: '{_truncate(query, 70)}'")
-    results = retrieve(query, user_id=user_id, target_files=target_files)
+
+    # Resolve requester's role and department for RBAC-scoped retrieval
+    requester_role = "engineer"
+    requester_department = "general"
+    if user_id:
+        try:
+            from backend.db.session import SessionLocal
+            from backend.db.models import User
+            import uuid as _uuid
+            db = SessionLocal()
+            try:
+                u = db.query(User).filter(User.id == _uuid.UUID(str(user_id))).first()
+                if u:
+                    requester_role = u.role or "engineer"
+                    requester_department = u.department or "general"
+            finally:
+                db.close()
+        except Exception:
+            pass  # Fall back to defaults
+
+    results = retrieve(
+        query,
+        user_id=user_id,
+        target_files=target_files,
+        requester_role=requester_role,
+        requester_department=requester_department,
+    )
 
     if not results:
         answer = "I don't have enough information in the knowledge vault to answer this."

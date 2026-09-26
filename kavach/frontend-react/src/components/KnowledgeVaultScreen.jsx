@@ -8,6 +8,8 @@ export default function KnowledgeVaultScreen({ user, onShowAuth }) {
   const [docToDelete, setDocToDelete] = useState(null); // { filename, chunk_count }
   const [isDeleting, setIsDeleting] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [uploadDepartment, setUploadDepartment] = useState('general');
+  const [uploadClassification, setUploadClassification] = useState('internal');
   const fileInputRef = useRef(null);
 
   const fetchKnowledgeList = async () => {
@@ -61,6 +63,8 @@ export default function KnowledgeVaultScreen({ user, onShowAuth }) {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('ingest', 'true');
+    formData.append('department', uploadDepartment);
+    formData.append('classification_level', uploadClassification);
 
     try {
       const res = await fetch('/knowledge/upload', {
@@ -237,6 +241,44 @@ export default function KnowledgeVaultScreen({ user, onShowAuth }) {
           }}
           hidden
         />
+      </div>
+
+      {/* Department & Classification selectors */}
+      <div style={{
+        display: 'flex',
+        gap: '12px',
+        marginTop: '12px',
+        flexWrap: 'wrap',
+      }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: 1, minWidth: '180px' }}>
+          <label style={{ fontSize: '12px', color: 'var(--text-muted, #94a3b8)', fontWeight: '500', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Department</label>
+          <select
+            className="field"
+            value={uploadDepartment}
+            onChange={(e) => setUploadDepartment(e.target.value)}
+            id="upload-department"
+          >
+            <option value="general">General</option>
+            <option value="process">Process</option>
+            <option value="maintenance">Maintenance</option>
+            <option value="hse">HSE</option>
+            <option value="projects">Projects</option>
+            <option value="finance">Finance</option>
+          </select>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: 1, minWidth: '180px' }}>
+          <label style={{ fontSize: '12px', color: 'var(--text-muted, #94a3b8)', fontWeight: '500', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Classification</label>
+          <select
+            className="field"
+            value={uploadClassification}
+            onChange={(e) => setUploadClassification(e.target.value)}
+            id="upload-classification"
+          >
+            <option value="public">Public</option>
+            <option value="internal">Internal</option>
+            <option value="restricted">Restricted</option>
+          </select>
+        </div>
       </div>
 
       {uploadStatus && (

@@ -51,6 +51,14 @@ KAVACH_Final_Merged_Architecture.md
 kavach/KAVACH_Final_Merged_Architecture.md
 ARCHITECTURE_MASTER_CONTEXT.md
 kavach/ARCHITECTURE_MASTER_CONTEXT.md
+KAVACH_Cloud_Deployment_Implementation_Spec.md
+KAVACH_Current_Codebase_Master_Context.md
+RAG_PIPELINE_ARCHITECTURE.md
+kavach/RAG_PIPELINE_ARCHITECTURE.md
+ROLE_BASED_ACCESS_CONTROL_GUIDE.md
+kavach/ROLE_BASED_ACCESS_CONTROL_GUIDE.md
+APPROVAL_ROUTING_AND_AUDIT_LOG_GUIDE.md
+kavach/APPROVAL_ROUTING_AND_AUDIT_LOG_GUIDE.md
 
 # IDE & OS files
 .vscode/

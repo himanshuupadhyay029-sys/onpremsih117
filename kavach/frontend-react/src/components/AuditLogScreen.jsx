@@ -23,6 +23,21 @@ export default function AuditLogScreen({ user, onShowAuth }) {
   const [filterType, setFilterType] = useState('');
   const [searchTaskId, setSearchTaskId] = useState('');
   const [openTaskGroups, setOpenTaskGroups] = useState({});
+  const [verifyState, setVerifyState] = useState({ checking: false, result: null });
+
+  const handleVerifyChain = async () => {
+    setVerifyState({ checking: true, result: null });
+    try {
+      const res = await fetch('/audit/verify', { credentials: 'include' });
+      const data = await res.json();
+      setVerifyState({ checking: false, result: data });
+    } catch (err) {
+      setVerifyState({
+        checking: false,
+        result: { valid: false, message: `Verification request failed: ${err.message}` },
+      });
+    }
+  };
 
   const fetchAuditEvents = async () => {
     if (!user) {
@@ -228,11 +243,79 @@ export default function AuditLogScreen({ user, onShowAuth }) {
           <option value="sandbox">sandbox</option>
           <option value="write">write</option>
           <option value="approval">approval</option>
+          <option value="access_denied">access_denied</option>
           <option value="firewall">firewall</option>
+          <option value="tamper_detected">tamper_detected</option>
           <option value="complete">complete</option>
           <option value="error">error</option>
         </select>
+        <button
+          type="button"
+          className="btn btn-secondary"
+          onClick={handleVerifyChain}
+          disabled={verifyState.checking}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          <svg className="icon icon-sm" viewBox="0 0 24 24" style={{ color: '#10b981' }}>
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" fill="none" stroke="currentColor" strokeWidth="2" />
+          </svg>
+          <span>{verifyState.checking ? 'Verifying Chain…' : 'Verify Chain Integrity'}</span>
+        </button>
       </div>
+
+      {verifyState.result && (
+        <div style={{
+          margin: '0 0 16px 0',
+          padding: '12px 16px',
+          borderRadius: '8px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '12px',
+          background: verifyState.result.valid ? 'rgba(16, 185, 129, 0.12)' : 'rgba(239, 68, 68, 0.15)',
+          border: `1px solid ${verifyState.result.valid ? 'rgba(16, 185, 129, 0.35)' : 'rgba(239, 68, 68, 0.4)'}`,
+          color: verifyState.result.valid ? '#34d399' : '#f87171',
+          fontSize: '13px',
+        }}>
+          {verifyState.result.valid ? (
+            <svg className="icon icon-sm" viewBox="0 0 24 24" style={{ flexShrink: 0 }}>
+              <path d="M20 6L9 17l-5-5" stroke="currentColor" strokeWidth="2.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          ) : (
+            <svg className="icon icon-sm" viewBox="0 0 24 24" style={{ flexShrink: 0 }}>
+              <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" fill="none" />
+              <path d="M12 8v4M12 16h.01" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+            </svg>
+          )}
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: '600', marginBottom: '2px' }}>
+              {verifyState.result.valid ? 'Cryptographic Hash Chain Verified (SHA-256)' : 'Tamper Detection Alert!'}
+            </div>
+            <div style={{ color: 'var(--text-secondary, #cbd5e1)', fontSize: '12px' }}>
+              {verifyState.result.message}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setVerifyState({ checking: false, result: null })}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: 'inherit',
+              cursor: 'pointer',
+              padding: '4px',
+              fontSize: '14px',
+              opacity: 0.7,
+            }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {loading ? (
         <div className="empty">Loading audit trail…</div>

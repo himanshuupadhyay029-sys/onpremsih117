@@ -25,8 +25,8 @@ from sqlalchemy.orm import Session
 
 from backend import config
 from backend.engine import registry, ollama
-from backend.audit.logbook import log_event, read_events
-from backend.auth.routes import router as auth_router, get_optional_user, get_current_user
+from backend.audit.logbook import log_event, read_events, verify_chain
+from backend.auth.routes import router as auth_router, get_optional_user, get_current_user, require_role
 from backend.brain.agent import run_agent
 from backend.brain.event_bus import emit_sync, register_task, unregister_task
 from backend.chat.routes import router as chat_router
@@ -34,7 +34,13 @@ from backend.db.models import AgentRun, Chat, Message, User
 from backend.db.session import get_db, SessionLocal
 from sqlalchemy import func
 from sqlalchemy.orm import Session
-from backend.guard.approve import get_approval, resolve_approval
+from backend.guard.approve import (
+    get_approval,
+    resolve_approval,
+    list_pending_approvals_db,
+    list_approval_history_db,
+    get_pending_approvals_count,
+)
 from backend.tools.writer import render_docx
 from backend.terminal_logger import log_gateway, _truncate
 from backend.vault.ingest import SUPPORTED_EXTENSIONS, ingest_document, delete_document, get_user_paths
@@ -612,7 +618,7 @@ class ModelAssignRequest(BaseModel):
     model: str
 
 @app.post("/models/assign")
-def assign_model(req: ModelAssignRequest):
+def assign_model(req: ModelAssignRequest, current_user: User = Depends(require_role('admin'))):
     try:
         new_reg = registry.set_model(req.role, req.model)
         return {"success": True, "registry": new_reg}
@@ -658,7 +664,7 @@ def pull_model_endpoint(req: ModelPullRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.delete("/models/{model_name:path}")
-def delete_model_endpoint(model_name: str):
+def delete_model_endpoint(model_name: str, current_user: User = Depends(require_role('admin'))):
     try:
         ollama.delete_model(model_name)
         return {"success": True, "message": f"Successfully deleted {model_name}"}
@@ -688,14 +694,73 @@ def run_code_endpoint(req: CodeExecuteRequest):
 
 
 @app.get("/audit")
-def audit(task_id: Optional[str] = None, current_user: User = Depends(get_current_user)):
-    return {"events": read_events(user_id=str(current_user.id), task_id=task_id)}
+def audit(
+    task_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
+):
+    """Returns audit events. Admin/auditor can optionally view another user's events via ?user_id=."""
+    target_user_id = str(current_user.id)
+    if user_id and current_user.role in ('admin', 'auditor'):
+        target_user_id = user_id
+        # Audit the admin override for viewing another user's log
+        if user_id != str(current_user.id):
+            log_event(
+                event_type="admin_override",
+                actor=str(current_user.id),
+                summary=f"Admin/auditor '{current_user.name}' viewed audit log of user {user_id}",
+                metadata={"action": "view_audit_log", "target_user_id": user_id},
+                external_calls=0,
+                user_id=str(current_user.id),
+            )
+    return {"events": read_events(user_id=target_user_id, task_id=task_id)}
+
+
+@app.get("/audit/verify")
+def verify_audit_chain_endpoint(
+    user_id: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
+):
+    """Verifies cryptographic SHA-256 hash-chain integrity of the audit log."""
+    target_user_id = str(current_user.id)
+    if user_id and current_user.role in ('admin', 'auditor'):
+        target_user_id = user_id
+
+    result = verify_chain(user_id=target_user_id)
+    return result
 
 
 
 class ApprovalRequest(BaseModel):
     decision: str
     edited_content: Optional[Any] = None
+
+
+@app.get("/approvals/count")
+def get_approvals_count_endpoint(
+    current_user: User = Depends(require_role("approver", "admin", "auditor")),
+    db: Session = Depends(get_db),
+):
+    """Returns the count of pending approvals awaiting review for the user's role and department."""
+    return {"pending_count": get_pending_approvals_count(current_user, db)}
+
+
+@app.get("/approvals/pending")
+def get_pending_approvals_endpoint(
+    current_user: User = Depends(require_role("approver", "admin")),
+    db: Session = Depends(get_db),
+):
+    """Lists pending approvals scoped to the user's department (or all for admin)."""
+    return list_pending_approvals_db(current_user, db)
+
+
+@app.get("/approvals/history")
+def get_approval_history_endpoint(
+    current_user: User = Depends(require_role("approver", "admin", "auditor")),
+    db: Session = Depends(get_db),
+):
+    """Lists past resolved approvals with unified diffs, decisions, and requester details."""
+    return list_approval_history_db(current_user, db)
 
 
 @app.get("/approval/{task_id}")
@@ -710,9 +775,10 @@ def get_approval_endpoint(task_id: str):
 def post_approval_endpoint(
     task_id: str,
     req: ApprovalRequest,
+    current_user: User = Depends(require_role("approver", "admin")),
     db: Session = Depends(get_db),
 ):
-    log_gateway("POST /approval/{task_id}", task_id, f"Decision: '{req.decision}'")
+    log_gateway("POST /approval/{task_id}", task_id, f"Decision: '{req.decision}' by {current_user.email} ({current_user.role}/{current_user.department})")
     record = get_approval(task_id)
     if not record:
         raise HTTPException(status_code=404, detail=f"No approval record found for task '{task_id}'.")
@@ -721,7 +787,19 @@ def post_approval_endpoint(
     if decision not in {"approve", "reject", "edit"}:
         raise HTTPException(status_code=400, detail="Decision must be 'approve', 'reject', or 'edit'.")
 
-    resolved = resolve_approval(task_id, decision=decision, edited_content=req.edited_content)
+    # Department-scoped approval routing:
+    # An approver can only decide approvals for their department (or general tasks)
+    task_dept = record.get("department", "general")
+    if current_user.role == "approver" and task_dept and task_dept != "general" and current_user.department != task_dept:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Approver from department '{current_user.department}' is not authorized to decide approvals for department '{task_dept}'.",
+        )
+
+    try:
+        resolved = resolve_approval(task_id, decision=decision, approver_user=current_user, edited_content=req.edited_content)
+    except PermissionError as pe:
+        raise HTTPException(status_code=403, detail=str(pe))
 
     if decision == "reject":
         try:
@@ -865,6 +943,8 @@ def knowledge_list(current_user: User = Depends(get_current_user)):
 def knowledge_upload(
     file: UploadFile = File(...),
     ingest: bool = Form(True),
+    department: str = Form("general"),
+    classification_level: str = Form("internal"),
     current_user: User = Depends(get_current_user),
 ):
     """Saves an uploaded document and (optionally) runs it through the existing
@@ -906,7 +986,12 @@ def knowledge_upload(
         }
 
     try:
-        result = ingest_document(dest, user_id=user_id_str)  # logs its own "ingest" audit event
+        result = ingest_document(
+            dest,
+            user_id=user_id_str,
+            department=department,
+            classification_level=classification_level,
+        )  # logs its own "document_ingested" audit event
         chunk_count = result.get("chunk_count", 0)
         return {
             "filename": safe_name,
@@ -958,13 +1043,13 @@ def shield_status():
 
 
 @app.post("/shield/lockdown")
-def shield_lockdown(elevate: bool = False):
+def shield_lockdown(elevate: bool = False, current_user: User = Depends(require_role('admin'))):
     result = enable_firewall_lockdown(elevate=elevate)
     return result
 
 
 @app.post("/shield/unlock")
-def shield_unlock(elevate: bool = False):
+def shield_unlock(elevate: bool = False, current_user: User = Depends(require_role('admin'))):
     result = disable_firewall_lockdown(elevate=elevate)
     return result
 

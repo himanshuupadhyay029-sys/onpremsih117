@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 
 export default function Sidebar({
   activeScreen,
@@ -14,6 +14,33 @@ export default function Sidebar({
   onNewChat,
   onSelectChat,
 }) {
+  const [pendingApprovalsCount, setPendingApprovalsCount] = useState(0);
+
+  useEffect(() => {
+    if (!user || (user.role !== 'approver' && user.role !== 'admin')) {
+      setPendingApprovalsCount(0);
+      return;
+    }
+    let isMounted = true;
+    const fetchCount = async () => {
+      try {
+        const res = await fetch('/approvals/count', { credentials: 'include' });
+        if (res.ok) {
+          const data = await res.json();
+          if (isMounted) setPendingApprovalsCount(data.pending_count || 0);
+        }
+      } catch {
+        // ignore
+      }
+    };
+    fetchCount();
+    const interval = setInterval(fetchCount, 6000);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, [user, activeScreen]);
+
   return (
     <aside className="sidebar" id="sidebar">
       <div className="sidebar-head">
@@ -84,17 +111,53 @@ export default function Sidebar({
           <span>Audit Log</span>
         </button>
 
-        <button
-          className={`nav-item ${activeScreen === 'models' ? 'is-active' : ''}`}
-          onClick={() => onSelectScreen('models')}
-        >
-          <svg className="icon" viewBox="0 0 24 24">
-            <path d="M12 2L2 7l10 5 10-5-10-5z" />
-            <path d="M2 17l10 5 10-5" />
-            <path d="M2 12l10 5 10-5" />
-          </svg>
-          <span>Model Settings</span>
-        </button>
+        {/* Approvals Dashboard — approver & admin only */}
+        {user && (user.role === 'approver' || user.role === 'admin') && (
+          <button
+            className={`nav-item ${activeScreen === 'approvals' ? 'is-active' : ''}`}
+            onClick={() => onSelectScreen('approvals')}
+          >
+            <svg className="icon" viewBox="0 0 24 24">
+              <path d="M9 11l3 3L22 4" stroke="currentColor" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" stroke="currentColor" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            <span style={{ flex: 1, textAlign: 'left' }}>Approvals</span>
+            {pendingApprovalsCount > 0 && (
+              <span className="sidebar-badge-count">{pendingApprovalsCount}</span>
+            )}
+          </button>
+        )}
+
+        {/* Model Settings — admin only */}
+        {(!user || user.role === 'admin') && (
+          <button
+            className={`nav-item ${activeScreen === 'models' ? 'is-active' : ''}`}
+            onClick={() => onSelectScreen('models')}
+          >
+            <svg className="icon" viewBox="0 0 24 24">
+              <path d="M12 2L2 7l10 5 10-5-10-5z" />
+              <path d="M2 17l10 5 10-5" />
+              <path d="M2 12l10 5 10-5" />
+            </svg>
+            <span>Model Settings</span>
+          </button>
+        )}
+
+        {/* User Management — admin only */}
+        {user && user.role === 'admin' && (
+          <button
+            className={`nav-item ${activeScreen === 'users' ? 'is-active' : ''}`}
+            onClick={() => onSelectScreen('users')}
+          >
+            <svg className="icon" viewBox="0 0 24 24">
+              <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" stroke="currentColor" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              <circle cx="9" cy="7" r="4" stroke="currentColor" fill="none" strokeWidth="2" />
+              <path d="M23 21v-2a4 4 0 00-3-3.87" stroke="currentColor" fill="none" strokeWidth="2" strokeLinecap="round" />
+              <path d="M16 3.13a4 4 0 010 7.75" stroke="currentColor" fill="none" strokeWidth="2" strokeLinecap="round" />
+            </svg>
+            <span>User Management</span>
+          </button>
+        )}
       </nav>
 
       {/* Chat History List (visible when on 'task' screen and user is logged in) */}
@@ -129,6 +192,18 @@ export default function Sidebar({
             <div className="user-info">
               <div className="user-name">{user.name}</div>
               <div className="user-email">{user.email}</div>
+              {user.role && (
+                <div style={{
+                  fontSize: '10px',
+                  color: user.role === 'admin' ? '#f59e0b' : user.role === 'approver' ? '#10b981' : '#818cf8',
+                  fontWeight: '600',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em',
+                  marginTop: '2px',
+                }}>
+                  {user.role} · {user.department || 'general'}
+                </div>
+              )}
             </div>
             <button
               className="logout-btn"
