@@ -2,7 +2,6 @@
 
 ### Sovereign on-premise agentic AI workbench for industrial knowledge work
 
-**Smart India Hackathon 2026 · SIH26117 · Mangalore Refinery and Petrochemicals Limited (MRPL)**
 
 KAVACH is a local-first prototype for working with confidential procedures, inspection records, technical images and engineering tasks. The operator console connects to a FastAPI service, a LangGraph task loop, locally served Ollama models, a document vault and local tools. It can retrieve source passages, read scans, calculate, run code in Docker and prepare reviewable Office files.
 
@@ -174,6 +173,4 @@ python -m pytest test_rbac_approval_audit.py test_code_sandbox.py test_search_im
 
 Some checks use mocks; integration behavior also depends on the local Ollama models, PostgreSQL, Docker and Tesseract being available. Treat individual OCR confidence values as engine estimates, not measured transcription accuracy, and validate P&ID interpretation against labeled plant-specific examples before relying on it.
 
-## SIH context
-
-KAVACH addresses **SIH26117** under the Smart Automation theme for **MRPL**. The goal is to bring multi-step AI assistance to industrial knowledge work while keeping the normal inference path and working data within an organization-controlled local environment.
+KAVACH addresses the Smart Automation theme . The goal is to bring multi-step AI assistance to industrial knowledge work while keeping the normal inference path and working data within an organization-controlled local environment.
