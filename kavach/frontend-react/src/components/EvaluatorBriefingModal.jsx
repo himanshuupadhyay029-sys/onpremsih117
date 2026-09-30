@@ -1,20 +1,13 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 
 export default function EvaluatorBriefingModal({ isOpen, onClose, isFirstVisit = false }) {
   const [dontShowAgain, setDontShowAgain] = useState(true);
-  const [slideProgress, setSlideProgress] = useState(0); // 0 to 100%
-  const [isDragging, setIsDragging] = useState(false);
-  const [isUnlocked, setIsUnlocked] = useState(false);
-
-  const trackRef = useRef(null);
-  const thumbRef = useRef(null);
-  const dragStartX = useRef(0);
-  const startProgress = useRef(0);
+  const [isActive, setIsActive]           = useState(false); // triggers CSS sweep
+  const [isUnlocked, setIsUnlocked]       = useState(false); // success state
 
   useEffect(() => {
     if (!isOpen) {
-      setSlideProgress(0);
-      setIsDragging(false);
+      setIsActive(false);
       setIsUnlocked(false);
     }
   }, [isOpen]);
@@ -34,87 +27,15 @@ export default function EvaluatorBriefingModal({ isOpen, onClose, isFirstVisit =
     }
   };
 
-  const triggerUnlock = () => {
+  /* Triggered on click — CSS animation runs, onAnimationEnd calls proceed */
+  const handleSlideClick = () => {
+    if (isActive || isUnlocked) return;
+    setIsActive(true);
+  };
+
+  const handleFillAnimEnd = () => {
     setIsUnlocked(true);
-    setSlideProgress(100);
-    setIsDragging(false);
-    setTimeout(() => {
-      handleProceed();
-    }, 350);
-  };
-
-  // --- Drag & Swipe Handlers ---
-  const handleDragStart = (clientX) => {
-    if (isUnlocked) return;
-    setIsDragging(true);
-    dragStartX.current = clientX;
-    startProgress.current = slideProgress;
-  };
-
-  const handleDragMove = (clientX) => {
-    if (!isDragging || isUnlocked || !trackRef.current || !thumbRef.current) return;
-    const trackRect = trackRef.current.getBoundingClientRect();
-    const thumbWidth = thumbRef.current.offsetWidth || 48;
-    const maxDistance = trackRect.width - thumbWidth;
-    if (maxDistance <= 0) return;
-
-    const deltaX = clientX - dragStartX.current;
-    const newProgress = Math.min(Math.max((deltaX / maxDistance) * 100, 0), 100);
-    setSlideProgress(newProgress);
-
-    if (newProgress >= 80) {
-      triggerUnlock();
-    }
-  };
-
-  const handleDragEnd = () => {
-    if (isUnlocked) return;
-    setIsDragging(false);
-    if (slideProgress >= 70) {
-      triggerUnlock();
-    } else {
-      setSlideProgress(0); // Snap back smoothly
-    }
-  };
-
-  // Global mouse up / touch end listener when dragging
-  const onMouseDown = (e) => {
-    e.preventDefault();
-    handleDragStart(e.clientX);
-  };
-
-  const onMouseMove = (e) => {
-    if (isDragging) {
-      handleDragMove(e.clientX);
-    }
-  };
-
-  const onMouseUp = () => {
-    if (isDragging) {
-      handleDragEnd();
-    }
-  };
-
-  const onTouchStart = (e) => {
-    if (e.touches.length > 0) {
-      handleDragStart(e.touches[0].clientX);
-    }
-  };
-
-  const onTouchMove = (e) => {
-    if (e.touches.length > 0) {
-      handleDragMove(e.touches[0].clientX);
-    }
-  };
-
-  const onTouchEnd = () => {
-    handleDragEnd();
-  };
-
-  // Click on track directly to auto-slide & unlock
-  const handleTrackClick = (e) => {
-    if (isUnlocked || isDragging) return;
-    triggerUnlock();
+    setTimeout(handleProceed, 320);
   };
 
   return (
@@ -125,10 +46,9 @@ export default function EvaluatorBriefingModal({ isOpen, onClose, isFirstVisit =
       role="dialog"
       aria-modal="true"
       aria-labelledby="briefing-title"
-      onMouseMove={onMouseMove}
-      onMouseUp={onMouseUp}
     >
       <div className="evaluator-briefing-modal" id="evaluator-briefing-modal">
+
         {/* Close button */}
         <button
           className="briefing-close-btn"
@@ -141,7 +61,7 @@ export default function EvaluatorBriefingModal({ isOpen, onClose, isFirstVisit =
           </svg>
         </button>
 
-        {/* Header / Authority Badges */}
+        {/* Header */}
         <div className="briefing-header">
           <div className="briefing-badge-row">
             <span className="briefing-badge sih-badge">
@@ -159,16 +79,12 @@ export default function EvaluatorBriefingModal({ isOpen, onClose, isFirstVisit =
           <h1 className="briefing-title" id="briefing-title">
             Demo Preview — Runs 100% On-Premises in Production
           </h1>
-          <p className="briefing-subtitle">
-            Judges cannot access our private GPU workstation remotely, so this cloud mirror lets you test the full agentic system from any browser.
-          </p>
         </div>
 
-        {/* Compact 3-column icon grid */}
+        {/* 3-column icon grid + model strip */}
         <div className="briefing-content">
           <div className="briefing-icon-grid">
 
-            {/* Card 1 — On-Prem Production */}
             <div className="briefing-icon-card">
               <div className="bic-icon bic-icon--green">
                 <svg viewBox="0 0 24 24" className="icon">
@@ -181,7 +97,6 @@ export default function EvaluatorBriefingModal({ isOpen, onClose, isFirstVisit =
               </p>
             </div>
 
-            {/* Card 2 — Demo via HuggingFace */}
             <div className="briefing-icon-card">
               <div className="bic-icon bic-icon--blue">
                 <svg viewBox="0 0 24 24" className="icon">
@@ -196,7 +111,6 @@ export default function EvaluatorBriefingModal({ isOpen, onClose, isFirstVisit =
               </p>
             </div>
 
-            {/* Card 3 — Identical Engine */}
             <div className="briefing-icon-card">
               <div className="bic-icon bic-icon--amber">
                 <svg viewBox="0 0 24 24" className="icon">
@@ -261,7 +175,7 @@ export default function EvaluatorBriefingModal({ isOpen, onClose, isFirstVisit =
           </div>
         </div>
 
-        {/* Footer Actions with Interactive Slide-from-Left-to-Right Button */}
+        {/* Footer */}
         <div className="briefing-footer">
           <label className="briefing-checkbox-label">
             <input
@@ -272,56 +186,45 @@ export default function EvaluatorBriefingModal({ isOpen, onClose, isFirstVisit =
             <span>Don&rsquo;t show this notice automatically again this session</span>
           </label>
 
-          {/* Interactive Slide Track */}
-          <div
-            className={`briefing-slide-track ${isUnlocked ? 'slide-unlocked' : ''} ${isDragging ? 'slide-dragging' : ''}`}
-            ref={trackRef}
-            onClick={handleTrackClick}
-            role="button"
-            tabIndex={0}
-            aria-label="Slide or click to enter sovereign workspace"
+          {/* ── Click-to-Sweep Slide Button ── */}
+          <button
+            className={`briefing-slide-track${isActive ? ' slide-active' : ''}${isUnlocked ? ' slide-unlocked' : ''}`}
+            onClick={handleSlideClick}
+            aria-label="Click to enter sovereign workspace"
+            id="btn-enter-workspace"
           >
-            {/* Background Fill showing progress */}
-            <div
-              className="briefing-slide-fill"
-              style={{
-                width: `${slideProgress}%`,
-                transition: isDragging ? 'none' : 'width 0.28s cubic-bezier(0.2, 0.9, 0.3, 1)'
-              }}
+            {/* Green sweep fill — CSS animation on .slide-active */}
+            <span
+              className="bst-fill"
+              onAnimationEnd={handleFillAnimEnd}
             />
 
-            {/* Shimmering Animated Text */}
-            <div className="briefing-slide-text" style={{ opacity: Math.max(1 - (slideProgress / 60), 0.15) }}>
-              <span className="slide-text-shimmer">Slide to Enter Workspace</span>
-              <span className="slide-chevrons">›››</span>
-            </div>
-
-            {/* Draggable Slider Thumb */}
-            <div
-              className="briefing-slide-thumb"
-              ref={thumbRef}
-              style={{
-                transform: `translateX(${slideProgress}%)`,
-                transition: isDragging ? 'none' : 'transform 0.28s cubic-bezier(0.2, 0.9, 0.3, 1)'
-              }}
-              onMouseDown={onMouseDown}
-              onTouchStart={onTouchStart}
-              onTouchMove={onTouchMove}
-              onTouchEnd={onTouchEnd}
-            >
+            {/* Left thumb icon */}
+            <span className="bst-thumb" aria-hidden="true">
               {isUnlocked ? (
-                <svg className="thumb-icon thumb-icon-check" viewBox="0 0 24 24">
+                <svg viewBox="0 0 24 24" className="bst-thumb-icon">
                   <polyline points="20 6 9 17 4 12" />
                 </svg>
               ) : (
-                <svg className="thumb-icon thumb-icon-arrow" viewBox="0 0 24 24">
+                <svg viewBox="0 0 24 24" className="bst-thumb-icon">
                   <line x1="5" y1="12" x2="19" y2="12" />
                   <polyline points="12 5 19 12 12 19" />
                 </svg>
               )}
-            </div>
-          </div>
+            </span>
+
+            {/* Label text */}
+            <span className="bst-label">
+              {isUnlocked ? 'Entering…' : 'Enter Sovereign Workspace'}
+            </span>
+
+            {/* Idle drifting arrow — hidden after activation */}
+            {!isActive && !isUnlocked && (
+              <span className="bst-arrow" aria-hidden="true">→</span>
+            )}
+          </button>
         </div>
+
       </div>
     </div>
   );
