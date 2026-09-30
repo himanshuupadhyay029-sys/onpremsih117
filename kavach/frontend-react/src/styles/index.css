@@ -3139,7 +3139,7 @@ a:hover { color: var(--kavach-accent-hover); text-decoration: underline; }
 }
 
 .briefing-title {
-  font-size: 24px;
+  font-size: 20px;
   font-weight: 700;
   color: var(--text-primary);
   margin: 0 0 6px 0;
@@ -3199,116 +3199,202 @@ a:hover { color: var(--kavach-accent-hover); text-decoration: underline; }
   line-height: 1.55;
 }
 
-.briefing-comparison-grid {
+/* ── Compact 3-column icon grid ── */
+.briefing-icon-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 14px;
-}
-
-.comparison-col {
-  border-radius: 12px;
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
+  grid-template-columns: repeat(3, 1fr);
   gap: 12px;
-  border: 1px solid;
 }
 
-.col-onprem {
-  background: rgba(78, 154, 107, 0.04);
-  border-color: rgba(78, 154, 107, 0.32);
-}
-
-.col-cloud {
-  background: rgba(59, 130, 246, 0.04);
-  border-color: rgba(59, 130, 246, 0.28);
-}
-
-.comparison-header {
+.briefing-icon-card {
+  border-radius: 12px;
+  padding: 16px 14px;
+  background: var(--bg-page);
+  border: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 8px;
+  transition: border-color 0.18s ease;
 }
 
-.col-status-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  padding: 2px 7px;
-  border-radius: 4px;
-  width: fit-content;
+.briefing-icon-card:hover {
+  border-color: rgba(79, 168, 216, 0.4);
 }
 
-.status-onprem {
-  background: rgba(78, 154, 107, 0.18);
+.bic-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+
+.bic-icon--green {
+  background: rgba(78, 154, 107, 0.14);
   color: var(--status-safe);
 }
 
-.status-cloud {
-  background: rgba(59, 130, 246, 0.18);
-  color: #2563eb;
+.bic-icon--blue {
+  background: rgba(59, 130, 246, 0.14);
+  color: #3b82f6;
 }
 
-.comparison-header h4 {
-  margin: 2px 0 0 0;
-  font-size: 14.5px;
-  font-weight: 600;
-  color: var(--text-primary);
+.bic-icon--amber {
+  background: rgba(245, 158, 11, 0.14);
+  color: #d97706;
 }
 
-.comparison-list {
-  list-style: none;
+.bic-title {
   margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  font-size: 12.5px;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--text-primary);
+  line-height: 1.3;
+}
+
+.bic-desc {
+  margin: 0;
+  font-size: 12px;
   color: var(--text-secondary);
   line-height: 1.5;
 }
 
-.comparison-list li {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
+.bic-desc code {
+  font-size: 11px;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--bg-hover);
 }
 
-.list-bullet {
-  font-weight: 700;
+/* ── Model Provenance Strip ── */
+.briefing-model-strip {
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--bg-page);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.bms-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--text-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.bms-note {
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text-tertiary);
+  font-size: 11.5px;
+}
+
+.bms-model-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.bms-model-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+}
+
+.bms-flag {
+  font-size: 16px;
+  line-height: 1;
   flex-shrink: 0;
 }
 
-.col-onprem .list-bullet {
-  color: var(--status-safe);
+.bms-model-name {
+  font-size: 12px;
+  background: var(--bg-hover);
+  padding: 2px 6px;
+  border-radius: 5px;
+  color: var(--text-primary);
+  font-family: var(--font-mono, monospace);
+  min-width: 0;
 }
 
-.col-cloud .list-bullet {
-  color: #3b82f6;
+.bms-role-badge {
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 5px;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
-.briefing-proof-strip {
+.bms-role--reason {
+  background: rgba(79, 168, 216, 0.14);
+  color: var(--kavach-accent-hover);
+}
+
+.bms-role--code {
+  background: rgba(245, 158, 11, 0.14);
+  color: #b45309;
+}
+
+.bms-role--embed {
+  background: rgba(139, 92, 246, 0.14);
+  color: #7c3aed;
+}
+
+.bms-origin {
+  margin-left: auto;
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
+.bms-status-chips {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--hairline);
 }
 
-.proof-pill {
+.bms-chip {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  border-radius: 8px;
-  background: var(--bg-page);
-  border: 1px solid var(--border);
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--text-primary);
+  gap: 5px;
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 6px;
+}
+
+.bms-chip--safe {
+  background: rgba(78, 154, 107, 0.14);
+  color: var(--status-safe);
+  border: 1px solid rgba(78, 154, 107, 0.28);
+}
+
+.bms-chip--danger {
+  background: rgba(239, 68, 68, 0.1);
+  color: #dc2626;
+  border: 1px solid rgba(239, 68, 68, 0.25);
+}
+
+/* ── Scroll / Bounce CTA icon ── */
+.btn-scroll-icon svg {
+  animation: bounce-down 1.4s ease-in-out infinite;
+}
+
+@keyframes bounce-down {
+  0%, 100% { transform: translateY(0);   opacity: 1;   }
+  50%       { transform: translateY(4px); opacity: 0.55; }
 }
 
 .briefing-footer {
@@ -3759,13 +3845,17 @@ a:hover { color: var(--kavach-accent-hover); text-decoration: underline; }
     gap: 12px;
   }
 
-  .briefing-comparison-grid {
+  .briefing-icon-grid {
     grid-template-columns: 1fr;
     gap: 10px;
   }
 
-  .comparison-col {
-    padding: 12px;
+  .briefing-icon-card {
+    padding: 14px 12px;
+  }
+
+  .bms-origin {
+    display: none;
   }
 
   .briefing-footer {

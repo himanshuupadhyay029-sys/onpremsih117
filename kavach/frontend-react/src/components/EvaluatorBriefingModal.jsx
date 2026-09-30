@@ -28,7 +28,7 @@ export default function EvaluatorBriefingModal({ isOpen, onClose, isFirstVisit =
       aria-labelledby="briefing-title"
     >
       <div className="evaluator-briefing-modal" id="evaluator-briefing-modal">
-        {/* Close button (always enabled, especially when opened from top bar) */}
+        {/* Close button */}
         <button
           className="briefing-close-btn"
           onClick={handleProceed}
@@ -56,131 +56,106 @@ export default function EvaluatorBriefingModal({ isOpen, onClose, isFirstVisit =
           </div>
 
           <h1 className="briefing-title" id="briefing-title">
-            Architectural Notice for Evaluators
+            Demo Preview — Runs 100% On-Premises in Production
           </h1>
           <p className="briefing-subtitle">
-            Why this live cloud deployment exists and how it verifies our 100% on-premises system.
+            Judges cannot access our private GPU workstation remotely, so this cloud mirror lets you test the full agentic system from any browser.
           </p>
         </div>
 
-        {/* Core Narrative / Explanation Grid */}
+        {/* Compact 3-column icon grid */}
         <div className="briefing-content">
-          {/* Section 1: The Context */}
-          <div className="briefing-card briefing-mandate-card">
-            <div className="briefing-card-icon mandate-icon">
-              <svg viewBox="0 0 24 24" className="icon">
-                <rect x="2" y="7" width="20" height="14" rx="2" ry="2" />
-                <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" />
-              </svg>
-            </div>
-            <div className="briefing-card-text">
-              <h3>The Mandate &amp; The Cloud Confusion</h3>
-              <p>
-                <strong>SIH Problem Statement 117 (MRPL)</strong> demands a strictly air-gapped, zero-leakage autonomous AI assistant for critical refinery operations. 
-                Because external judges cannot physically access our private on-premises GPU workstation over the internet, we deployed this live cloud mirror so evaluators can immediately test the assistant from any browser.
+          <div className="briefing-icon-grid">
+
+            {/* Card 1 — On-Prem Production */}
+            <div className="briefing-icon-card">
+              <div className="bic-icon bic-icon--green">
+                <svg viewBox="0 0 24 24" className="icon">
+                  <path d="M12 3l7 3v5.5c0 4.2-2.9 8.1-7 9.5-4.1-1.4-7-5.3-7-9.5V6l7-3z" />
+                </svg>
+              </div>
+              <h4 className="bic-title">Air-Gapped on Production</h4>
+              <p className="bic-desc">
+                Real system runs with hardware firewall, Docker <code>--network none</code> sandbox, and zero external egress.
               </p>
             </div>
+
+            {/* Card 2 — Demo via HuggingFace */}
+            <div className="briefing-icon-card">
+              <div className="bic-icon bic-icon--blue">
+                <svg viewBox="0 0 24 24" className="icon">
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="2" y1="12" x2="22" y2="12" />
+                  <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+                </svg>
+              </div>
+              <h4 className="bic-title">Demo Uses HuggingFace</h4>
+              <p className="bic-desc">
+                This live link uses HF Inference API as a remote fallback so judges can test workflows without local GPU setup.
+              </p>
+            </div>
+
+            {/* Card 3 — Identical Engine */}
+            <div className="briefing-icon-card">
+              <div className="bic-icon bic-icon--amber">
+                <svg viewBox="0 0 24 24" className="icon">
+                  <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+                </svg>
+              </div>
+              <h4 className="bic-title">Identical Agentic Engine</h4>
+              <p className="bic-desc">
+                Same LangGraph planner, FAISS Knowledge Vault, audit trail, and Human Approval Gate — only model source differs.
+              </p>
+            </div>
+
           </div>
 
-          {/* Section 2: Architecture Comparison Matrix */}
-          <div className="briefing-comparison-grid">
-            {/* Column 1: The Real Physical Hardware Setup */}
-            <div className="comparison-col col-onprem">
-              <div className="comparison-header">
-                <span className="col-status-pill status-onprem">
-                  <svg className="icon icon-sm" viewBox="0 0 24 24">
-                    <polyline points="20 6 9 17 4 12" />
-                  </svg>
-                  Physical Workstation (Our Real Rig)
-                </span>
-                <h4>100% On-Premises &amp; Air-Gapped</h4>
-              </div>
-              <ul className="comparison-list">
-                <li>
-                  <span className="list-bullet">✓</span>
-                  <div>
-                    <strong>Local LLM Inference:</strong> Runs on local Ollama (<code>Qwen2.5-3B</code>, <code>Qwen2.5-Coder</code>, <code>Moondream</code>) directly on local hardware.
-                  </div>
-                </li>
-                <li>
-                  <span className="list-bullet">✓</span>
-                  <div>
-                    <strong>Hardware Firewall Lockdown:</strong> Enforces OS default-deny firewall (Windows Filtering Platform / iptables) blocking all external egress.
-                  </div>
-                </li>
-                <li>
-                  <span className="list-bullet">✓</span>
-                  <div>
-                    <strong>Isolated Docker Sandbox:</strong> Python sandbox execution isolated with <code>--network none</code>.
-                  </div>
-                </li>
-                <li>
-                  <span className="list-bullet">✓</span>
-                  <div>
-                    <strong>Offline Knowledge Vault:</strong> Local FAISS + BM25 vector indices stored securely on-device.
-                  </div>
-                </li>
-              </ul>
+          {/* Model Provenance Strip */}
+          <div className="briefing-model-strip">
+            <div className="bms-header">
+              <svg viewBox="0 0 24 24" className="icon icon-sm">
+                <rect x="2" y="3" width="20" height="14" rx="2" />
+                <line x1="8" y1="21" x2="16" y2="21" />
+                <line x1="12" y1="17" x2="12" y2="21" />
+              </svg>
+              <span>On-Premises Production Models</span>
+              <span className="bms-note">(local Ollama — no internet)</span>
             </div>
 
-            {/* Column 2: This Live Web Evaluation Link */}
-            <div className="comparison-col col-cloud">
-              <div className="comparison-header">
-                <span className="col-status-pill status-cloud">
-                  <svg className="icon icon-sm" viewBox="0 0 24 24">
-                    <circle cx="12" cy="12" r="10" />
-                    <line x1="2" y1="12" x2="22" y2="12" />
-                  </svg>
-                  This Live Web Link (Evaluator Preview)
-                </span>
-                <h4>Remote Evaluation Bridge</h4>
+            <div className="bms-model-rows">
+              <div className="bms-model-row">
+                <span className="bms-flag">🇺🇸</span>
+                <code className="bms-model-name">gemma3:4b</code>
+                <span className="bms-role-badge bms-role--reason">Reasoning · Vision</span>
+                <span className="bms-origin">Google DeepMind</span>
               </div>
-              <ul className="comparison-list">
-                <li>
-                  <span className="list-bullet">ℹ</span>
-                  <div>
-                    <strong>Evaluation Bridge:</strong> Uses remote model fallback so remote judges can test agentic workflows simultaneously without local setup.
-                  </div>
-                </li>
-                <li>
-                  <span className="list-bullet">ℹ</span>
-                  <div>
-                    <strong>Identical Agentic Engine:</strong> Runs the exact same planning loop, Knowledge Vault RAG, and document rendering pipelines.
-                  </div>
-                </li>
-                <li>
-                  <span className="list-bullet">ℹ</span>
-                  <div>
-                    <strong>Audit &amp; Human Approval:</strong> Full audit trail, immutable logs, and human-in-the-loop document approval workflow intact.
-                  </div>
-                </li>
-                <li>
-                  <span className="list-bullet">ℹ</span>
-                  <div>
-                    <strong>Telemetry Simulator:</strong> Live connection telemetry and hardware firewall toggles remain interactive for inspection.
-                  </div>
-                </li>
-              </ul>
+              <div className="bms-model-row">
+                <span className="bms-flag">🇺🇸</span>
+                <code className="bms-model-name">granite4.1:3b</code>
+                <span className="bms-role-badge bms-role--code">Code</span>
+                <span className="bms-origin">IBM Research</span>
+              </div>
+              <div className="bms-model-row">
+                <span className="bms-flag">🇺🇸</span>
+                <code className="bms-model-name">nomic-embed-text</code>
+                <span className="bms-role-badge bms-role--embed">Embeddings</span>
+                <span className="bms-origin">Nomic AI</span>
+              </div>
             </div>
-          </div>
 
-          {/* Proof Badges Row */}
-          <div className="briefing-proof-strip">
-            <div className="proof-pill">
-              <span className="proof-icon">🛡️</span>
-              <span>100% Offline Architecture</span>
-            </div>
-            <div className="proof-pill">
-              <span className="proof-icon">⚡</span>
-              <span>Zero Cloud Dependency in Prod</span>
-            </div>
-            <div className="proof-pill">
-              <span className="proof-icon">🔒</span>
-              <span>Docker &lsquo;--network none&rsquo; Sandbox</span>
-            </div>
-            <div className="proof-pill">
-              <span className="proof-icon">📑</span>
-              <span>Local FAISS + BM25 Vault</span>
+            <div className="bms-status-chips">
+              <span className="bms-chip bms-chip--safe">
+                <svg viewBox="0 0 24 24" className="icon" style={{width:'13px',height:'13px'}}>
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+                USA / EU Origin Only
+              </span>
+              <span className="bms-chip bms-chip--danger">
+                <svg viewBox="0 0 24 24" className="icon" style={{width:'13px',height:'13px'}}>
+                  <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+                No Chinese Models in Production
+              </span>
             </div>
           </div>
         </div>
@@ -201,11 +176,12 @@ export default function EvaluatorBriefingModal({ isOpen, onClose, isFirstVisit =
             onClick={handleProceed}
             id="btn-launch-demo"
           >
-            <span>Proceed to Sovereign Workspace</span>
-            <svg className="icon" viewBox="0 0 24 24">
-              <line x1="5" y1="12" x2="19" y2="12" />
-              <polyline points="12 5 19 12 12 19" />
-            </svg>
+            <span>Enter Sovereign Workspace</span>
+            <span className="btn-scroll-icon" aria-hidden="true">
+              <svg className="icon" viewBox="0 0 24 24">
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+            </span>
           </button>
         </div>
       </div>
