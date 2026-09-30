@@ -1,7 +1,23 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 
 export default function EvaluatorBriefingModal({ isOpen, onClose, isFirstVisit = false }) {
   const [dontShowAgain, setDontShowAgain] = useState(true);
+  const [slideProgress, setSlideProgress] = useState(0); // 0 to 100%
+  const [isDragging, setIsDragging] = useState(false);
+  const [isUnlocked, setIsUnlocked] = useState(false);
+
+  const trackRef = useRef(null);
+  const thumbRef = useRef(null);
+  const dragStartX = useRef(0);
+  const startProgress = useRef(0);
+
+  useEffect(() => {
+    if (!isOpen) {
+      setSlideProgress(0);
+      setIsDragging(false);
+      setIsUnlocked(false);
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -18,6 +34,89 @@ export default function EvaluatorBriefingModal({ isOpen, onClose, isFirstVisit =
     }
   };
 
+  const triggerUnlock = () => {
+    setIsUnlocked(true);
+    setSlideProgress(100);
+    setIsDragging(false);
+    setTimeout(() => {
+      handleProceed();
+    }, 350);
+  };
+
+  // --- Drag & Swipe Handlers ---
+  const handleDragStart = (clientX) => {
+    if (isUnlocked) return;
+    setIsDragging(true);
+    dragStartX.current = clientX;
+    startProgress.current = slideProgress;
+  };
+
+  const handleDragMove = (clientX) => {
+    if (!isDragging || isUnlocked || !trackRef.current || !thumbRef.current) return;
+    const trackRect = trackRef.current.getBoundingClientRect();
+    const thumbWidth = thumbRef.current.offsetWidth || 48;
+    const maxDistance = trackRect.width - thumbWidth;
+    if (maxDistance <= 0) return;
+
+    const deltaX = clientX - dragStartX.current;
+    const newProgress = Math.min(Math.max((deltaX / maxDistance) * 100, 0), 100);
+    setSlideProgress(newProgress);
+
+    if (newProgress >= 80) {
+      triggerUnlock();
+    }
+  };
+
+  const handleDragEnd = () => {
+    if (isUnlocked) return;
+    setIsDragging(false);
+    if (slideProgress >= 70) {
+      triggerUnlock();
+    } else {
+      setSlideProgress(0); // Snap back smoothly
+    }
+  };
+
+  // Global mouse up / touch end listener when dragging
+  const onMouseDown = (e) => {
+    e.preventDefault();
+    handleDragStart(e.clientX);
+  };
+
+  const onMouseMove = (e) => {
+    if (isDragging) {
+      handleDragMove(e.clientX);
+    }
+  };
+
+  const onMouseUp = () => {
+    if (isDragging) {
+      handleDragEnd();
+    }
+  };
+
+  const onTouchStart = (e) => {
+    if (e.touches.length > 0) {
+      handleDragStart(e.touches[0].clientX);
+    }
+  };
+
+  const onTouchMove = (e) => {
+    if (e.touches.length > 0) {
+      handleDragMove(e.touches[0].clientX);
+    }
+  };
+
+  const onTouchEnd = () => {
+    handleDragEnd();
+  };
+
+  // Click on track directly to auto-slide & unlock
+  const handleTrackClick = (e) => {
+    if (isUnlocked || isDragging) return;
+    triggerUnlock();
+  };
+
   return (
     <div
       className="evaluator-briefing-overlay"
@@ -26,6 +125,8 @@ export default function EvaluatorBriefingModal({ isOpen, onClose, isFirstVisit =
       role="dialog"
       aria-modal="true"
       aria-labelledby="briefing-title"
+      onMouseMove={onMouseMove}
+      onMouseUp={onMouseUp}
     >
       <div className="evaluator-briefing-modal" id="evaluator-briefing-modal">
         {/* Close button */}
@@ -160,7 +261,7 @@ export default function EvaluatorBriefingModal({ isOpen, onClose, isFirstVisit =
           </div>
         </div>
 
-        {/* Footer Actions */}
+        {/* Footer Actions with Interactive Slide-from-Left-to-Right Button */}
         <div className="briefing-footer">
           <label className="briefing-checkbox-label">
             <input
@@ -171,18 +272,55 @@ export default function EvaluatorBriefingModal({ isOpen, onClose, isFirstVisit =
             <span>Don&rsquo;t show this notice automatically again this session</span>
           </label>
 
-          <button
-            className="btn-launch-demo"
-            onClick={handleProceed}
-            id="btn-launch-demo"
+          {/* Interactive Slide Track */}
+          <div
+            className={`briefing-slide-track ${isUnlocked ? 'slide-unlocked' : ''} ${isDragging ? 'slide-dragging' : ''}`}
+            ref={trackRef}
+            onClick={handleTrackClick}
+            role="button"
+            tabIndex={0}
+            aria-label="Slide or click to enter sovereign workspace"
           >
-            <span>Enter Sovereign Workspace</span>
-            <span className="btn-scroll-icon" aria-hidden="true">
-              <svg className="icon" viewBox="0 0 24 24">
-                <polyline points="6 9 12 15 18 9" />
-              </svg>
-            </span>
-          </button>
+            {/* Background Fill showing progress */}
+            <div
+              className="briefing-slide-fill"
+              style={{
+                width: `${slideProgress}%`,
+                transition: isDragging ? 'none' : 'width 0.28s cubic-bezier(0.2, 0.9, 0.3, 1)'
+              }}
+            />
+
+            {/* Shimmering Animated Text */}
+            <div className="briefing-slide-text" style={{ opacity: Math.max(1 - (slideProgress / 60), 0.15) }}>
+              <span className="slide-text-shimmer">Slide to Enter Workspace</span>
+              <span className="slide-chevrons">›››</span>
+            </div>
+
+            {/* Draggable Slider Thumb */}
+            <div
+              className="briefing-slide-thumb"
+              ref={thumbRef}
+              style={{
+                transform: `translateX(${slideProgress}%)`,
+                transition: isDragging ? 'none' : 'transform 0.28s cubic-bezier(0.2, 0.9, 0.3, 1)'
+              }}
+              onMouseDown={onMouseDown}
+              onTouchStart={onTouchStart}
+              onTouchMove={onTouchMove}
+              onTouchEnd={onTouchEnd}
+            >
+              {isUnlocked ? (
+                <svg className="thumb-icon thumb-icon-check" viewBox="0 0 24 24">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+              ) : (
+                <svg className="thumb-icon thumb-icon-arrow" viewBox="0 0 24 24">
+                  <line x1="5" y1="12" x2="19" y2="12" />
+                  <polyline points="12 5 19 12 12 19" />
+                </svg>
+              )}
+            </div>
+          </div>
         </div>
       </div>
     </div>

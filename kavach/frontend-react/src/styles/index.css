@@ -3387,14 +3387,142 @@ a:hover { color: var(--kavach-accent-hover); text-decoration: underline; }
   border: 1px solid rgba(239, 68, 68, 0.25);
 }
 
-/* ── Scroll / Bounce CTA icon ── */
-.btn-scroll-icon svg {
-  animation: bounce-down 1.4s ease-in-out infinite;
+/* ── Interactive Left-to-Right Slide Track ── */
+.briefing-slide-track {
+  position: relative;
+  width: 290px;
+  height: 48px;
+  background: #090d16;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 28px;
+  overflow: hidden;
+  user-select: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.4), inset 0 1px 2px rgba(255, 255, 255, 0.05);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
-@keyframes bounce-down {
-  0%, 100% { transform: translateY(0);   opacity: 1;   }
-  50%       { transform: translateY(4px); opacity: 0.55; }
+.briefing-slide-track:hover {
+  border-color: rgba(79, 168, 216, 0.4);
+  box-shadow: 0 4px 22px rgba(79, 168, 216, 0.15), inset 0 1px 2px rgba(255, 255, 255, 0.08);
+}
+
+.briefing-slide-track.slide-dragging {
+  border-color: rgba(78, 154, 107, 0.6);
+  cursor: grabbing;
+}
+
+.briefing-slide-track.slide-unlocked {
+  border-color: var(--status-safe);
+  background: rgba(78, 154, 107, 0.2);
+}
+
+/* Background Progress Fill */
+.briefing-slide-fill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  background: linear-gradient(90deg, rgba(78, 154, 107, 0.35), rgba(79, 168, 216, 0.45));
+  border-radius: 28px;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Shimmering Animated Text */
+.briefing-slide-text {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-left: 28px;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  pointer-events: none;
+  z-index: 2;
+  transition: opacity 0.2s ease;
+}
+
+.slide-text-shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.45) 0%,
+    rgba(255, 255, 255, 0.95) 50%,
+    rgba(255, 255, 255, 0.45) 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: slideTextSweep 2.2s infinite linear;
+}
+
+.slide-chevrons {
+  color: rgba(79, 168, 216, 0.85);
+  font-size: 13px;
+  letter-spacing: 1px;
+  animation: chevronPulse 1.4s infinite ease-in-out;
+}
+
+@keyframes slideTextSweep {
+  0% { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}
+
+@keyframes chevronPulse {
+  0%, 100% { transform: translateX(0); opacity: 0.6; }
+  50% { transform: translateX(4px); opacity: 1; }
+}
+
+/* Draggable Thumb */
+.briefing-slide-thumb {
+  position: relative;
+  z-index: 3;
+  margin-left: 4px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #1e293b, #0f172a);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff;
+  cursor: grab;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4), 0 0 12px rgba(79, 168, 216, 0.25);
+  touch-action: none;
+}
+
+.briefing-slide-thumb:active,
+.slide-dragging .briefing-slide-thumb {
+  cursor: grabbing;
+  transform: scale(1.04);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5), 0 0 16px rgba(78, 154, 107, 0.45);
+}
+
+.thumb-icon {
+  width: 16px;
+  height: 16px;
+  transition: transform 0.2s ease;
+}
+
+.thumb-icon-arrow {
+  color: #38bdf8;
+  animation: thumbNudge 1.6s infinite ease-in-out;
+}
+
+.thumb-icon-check {
+  color: var(--status-safe);
+  stroke-width: 2.5;
+}
+
+@keyframes thumbNudge {
+  0%, 100% { transform: translateX(0); }
+  50% { transform: translateX(3px); }
 }
 
 .briefing-footer {
@@ -3417,33 +3545,6 @@ a:hover { color: var(--kavach-accent-hover); text-decoration: underline; }
   color: var(--text-secondary);
   cursor: pointer;
   user-select: none;
-}
-
-.btn-launch-demo {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  padding: 12px 24px;
-  border-radius: 10px;
-  background: #0d0d0d;
-  color: #ffffff;
-  font-weight: 600;
-  font-size: 14px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  border: none;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
-}
-
-.btn-launch-demo:hover {
-  background: #262626;
-  transform: translateY(-1px);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.22);
-}
-
-.btn-launch-demo .icon {
-  width: 16px;
-  height: 16px;
 }
 
 /* ==========================================================================
@@ -3865,10 +3966,8 @@ a:hover { color: var(--kavach-accent-hover); text-decoration: underline; }
     gap: 12px;
   }
 
-  .btn-launch-demo {
+  .briefing-slide-track {
     width: 100%;
-    justify-content: center;
-    padding: 12px;
   }
 
 }
