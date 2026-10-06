@@ -20,6 +20,20 @@ active_pulls: Dict[str, httpx.AsyncClient] = {}
 
 
 
+_shared_client: Optional[httpx.Client] = None
+
+
+def _get_shared_client() -> httpx.Client:
+    global _shared_client
+    if _shared_client is None or _shared_client.is_closed:
+        _shared_client = httpx.Client(
+            base_url=config.OLLAMA_BASE_URL,
+            timeout=10.0,
+            limits=httpx.Limits(max_keepalive_connections=10, max_connections=20),
+        )
+    return _shared_client
+
+
 def _get_client(timeout: float = 120.0) -> httpx.Client:
     return httpx.Client(base_url=config.OLLAMA_BASE_URL, timeout=timeout)
 
@@ -196,12 +210,12 @@ def vision(model: str, prompt: str, image_path: Union[str, Path], system: Option
 def list_models() -> List[str]:
     """Returns a list of all model tags currently installed in local Ollama."""
     try:
-        with _get_client(timeout=10.0) as client:
-            resp = client.get("/api/tags")
-            resp.raise_for_status()
-            data = resp.json()
-            models = data.get("models", [])
-            return [m.get("name", m.get("model", "")) for m in models]
+        client = _get_shared_client()
+        resp = client.get("/api/tags")
+        resp.raise_for_status()
+        data = resp.json()
+        models = data.get("models", [])
+        return [m.get("name", m.get("model", "")) for m in models]
     except httpx.ConnectError as exc:
         raise OllamaError(
             f"Cannot connect to local Ollama at {config.OLLAMA_BASE_URL}. "

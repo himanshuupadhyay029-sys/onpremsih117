@@ -1,6 +1,25 @@
 import React, { useState, useEffect } from 'react';
+import SovereignSelect from './SovereignSelect';
 
 export default function UserManagementScreen({ user }) {
+  const isSuperadmin = user?.role === 'superadmin';
+  const userDept = user?.department || 'general';
+
+  const getRoleBadgeStyle = (role) => {
+    switch (role) {
+      case 'superadmin':
+        return { background: '#fef2f2', color: '#991b1b', border: '1px solid #ef4444' };
+      case 'admin':
+        return { background: '#fffbeb', color: '#b45309', border: '1px solid #f59e0b' };
+      case 'approver':
+        return { background: '#f5f3ff', color: '#6d28d9', border: '1px solid #8b5cf6' };
+      case 'auditor':
+        return { background: '#ecfdf5', color: '#047857', border: '1px solid #10b981' };
+      default:
+        return { background: '#f0f9ff', color: '#0369a1', border: '1px solid #0ea5e9' };
+    }
+  };
+
   const [activeTab, setActiveTab] = useState('users'); // 'users' | 'depts_roles'
   const [users, setUsers] = useState([]);
   const [departments, setDepartments] = useState([]);
@@ -16,7 +35,7 @@ export default function UserManagementScreen({ user }) {
     email: '',
     password: '',
     role: 'engineer',
-    department: 'general',
+    department: isSuperadmin ? 'general' : userDept,
   });
 
   const [editingUser, setEditingUser] = useState(null);
@@ -87,7 +106,7 @@ export default function UserManagementScreen({ user }) {
 
       showNoticeMsg('success', `User '${data.name}' (${data.email}) provisioned successfully.`);
       setShowProvisionModal(false);
-      setProvisionData({ name: '', email: '', password: '', role: 'engineer', department: 'general' });
+      setProvisionData({ name: '', email: '', password: '', role: 'engineer', department: isSuperadmin ? 'general' : userDept });
       loadData();
     } catch (err) {
       showNoticeMsg('error', err.message);
@@ -260,9 +279,26 @@ export default function UserManagementScreen({ user }) {
     <section className="screen screen-wide">
       <div className="screen-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px' }}>
         <div>
-          <h2 className="screen-title">User & Access Management</h2>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <h2 className="screen-title" style={{ margin: 0 }}>User & Access Management</h2>
+            <span style={{
+              fontSize: '11px',
+              fontWeight: '700',
+              padding: '3px 12px',
+              borderRadius: 'var(--radius-pill)',
+              textTransform: 'uppercase',
+              letterSpacing: '0.05em',
+              background: isSuperadmin ? '#fee2e2' : '#fef3c7',
+              color: isSuperadmin ? '#991b1b' : '#92400e',
+              border: `1px solid ${isSuperadmin ? '#f87171' : '#f59e0b'}`,
+            }}>
+              {isSuperadmin ? '★ Sovereign Root Superadmin' : `Dept Admin · ${userDept.toUpperCase()}`}
+            </span>
+          </div>
           <p className="screen-sub">
-            Administrative provisioning, departmental scoping, and organizational role routing.
+            {isSuperadmin
+              ? 'Site-wide root authority: cross-department user provisioning, plant topology, and role governance.'
+              : `Departmental scope: managing operators, approvers, and engineers strictly within the ${userDept.toUpperCase()} department.`}
           </p>
         </div>
         <div style={{ display: 'flex', gap: '8px' }}>
@@ -283,8 +319,8 @@ export default function UserManagementScreen({ user }) {
 
       {notice && (
         <div style={{
-          padding: '12px 16px',
-          borderRadius: '8px',
+          padding: '12px 18px',
+          borderRadius: 'var(--radius)',
           marginBottom: '16px',
           fontSize: '13px',
           fontWeight: '500',
@@ -302,14 +338,14 @@ export default function UserManagementScreen({ user }) {
       {/* TAB 1: USERS DIRECTORY */}
       {activeTab === 'users' && (
         <>
-          <div className="filters" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+          <div className="filters" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px', gap: '12px' }}>
             <input
               className="field"
               type="search"
               placeholder="Search user by name, email, role, or department…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              style={{ flex: 1, maxWidth: '400px' }}
+              style={{ flex: 1, maxWidth: '420px', borderRadius: 'var(--radius-pill)', height: '40px', padding: '0 18px' }}
             />
             <button
               className="btn btn-primary"
@@ -330,31 +366,35 @@ export default function UserManagementScreen({ user }) {
           ) : (
             <div style={{
               background: '#ffffff',
-              border: '1px solid rgba(0, 0, 0, 0.09)',
-              borderRadius: '12px',
+              border: '1px solid var(--border)',
+              borderRadius: 'var(--radius-lg)',
               overflow: 'hidden',
-              boxShadow: '0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.02)',
+              boxShadow: 'var(--shadow-card)',
             }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
                 <thead>
                   <tr style={{
-                    borderBottom: '1px solid rgba(0, 0, 0, 0.08)',
+                    borderBottom: '1px solid #e2e8f0',
                     background: '#f8fafc',
                     color: '#64748b',
                     textTransform: 'uppercase',
                     fontSize: '11px',
                     letterSpacing: '0.05em',
                   }}>
-                    <th style={{ padding: '14px 16px' }}>User</th>
-                    <th style={{ padding: '14px 16px' }}>Role</th>
-                    <th style={{ padding: '14px 16px' }}>Department</th>
-                    <th style={{ padding: '14px 16px' }}>Created</th>
-                    <th style={{ padding: '14px 16px', textAlign: 'right' }}>Actions</th>
+                    <th style={{ padding: '14px 18px' }}>User</th>
+                    <th style={{ padding: '14px 18px' }}>Role</th>
+                    <th style={{ padding: '14px 18px' }}>Department</th>
+                    <th style={{ padding: '14px 18px' }}>Created</th>
+                    <th style={{ padding: '14px 18px', textAlign: 'right' }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredUsers.map((u) => {
                     const isSelf = user && (user.id === u.id || user.email === u.email);
+                    const isRowAdminOrSuper = u.role === 'admin' || u.role === 'superadmin';
+                    const canEdit = isSuperadmin || isSelf || !isRowAdminOrSuper;
+                    const canDelete = !isSelf && (isSuperadmin || (!isRowAdminOrSuper && u.department === userDept));
+
                     return (
                       <tr
                         key={u.id}
@@ -364,30 +404,28 @@ export default function UserManagementScreen({ user }) {
                           transition: 'background 0.15s ease',
                         }}
                       >
-                        <td style={{ padding: '14px 16px' }}>
+                        <td style={{ padding: '14px 18px' }}>
                           <div style={{ fontWeight: '600', color: '#0f172a' }}>
-                            {u.name} {isSelf && <span style={{ fontSize: '10px', color: '#0284c7', border: '1px solid #38bdf8', borderRadius: '4px', padding: '1px 5px', marginLeft: '6px', fontWeight: '700', background: '#f0f9ff' }}>YOU</span>}
+                            {u.name} {isSelf && <span style={{ fontSize: '10px', color: '#0284c7', border: '1px solid #38bdf8', borderRadius: 'var(--radius-pill)', padding: '2px 8px', marginLeft: '6px', fontWeight: '700', background: '#f0f9ff' }}>YOU</span>}
                           </div>
                           <div style={{ color: '#64748b', fontSize: '12px' }}>{u.email}</div>
                         </td>
-                        <td style={{ padding: '14px 16px' }}>
+                        <td style={{ padding: '14px 18px' }}>
                           <span style={{
-                            padding: '3px 8px',
-                            borderRadius: '4px',
+                            padding: '3px 10px',
+                            borderRadius: 'var(--radius-pill)',
                             fontSize: '11px',
-                            fontWeight: '600',
+                            fontWeight: '700',
                             textTransform: 'uppercase',
-                            background: u.role === 'admin' ? '#fee2e2' : u.role === 'approver' ? '#f3e8ff' : u.role === 'auditor' ? '#ecfdf5' : '#e0f2fe',
-                            color: u.role === 'admin' ? '#b91c1c' : u.role === 'approver' ? '#7e22ce' : u.role === 'auditor' ? '#047857' : '#0369a1',
-                            border: `1px solid ${u.role === 'admin' ? '#fca5a5' : u.role === 'approver' ? '#d8b4fe' : u.role === 'auditor' ? '#a7f3d0' : '#bae6fd'}`,
+                            ...getRoleBadgeStyle(u.role),
                           }}>
-                            {u.role}
+                            {u.role === 'superadmin' ? '★ SUPERADMIN' : u.role}
                           </span>
                         </td>
-                        <td style={{ padding: '14px 16px' }}>
+                        <td style={{ padding: '14px 18px' }}>
                           <span style={{
-                            padding: '3px 8px',
-                            borderRadius: '4px',
+                            padding: '3px 10px',
+                            borderRadius: 'var(--radius-pill)',
                             fontSize: '11px',
                             fontWeight: '600',
                             textTransform: 'uppercase',
@@ -398,30 +436,34 @@ export default function UserManagementScreen({ user }) {
                             {u.department}
                           </span>
                         </td>
-                        <td style={{ padding: '14px 16px', color: '#64748b', fontSize: '12px' }}>
+                        <td style={{ padding: '14px 18px', color: '#64748b', fontSize: '12px' }}>
                           {u.created_at ? new Date(u.created_at).toLocaleDateString() : '—'}
                         </td>
-                        <td style={{ padding: '14px 16px', textAlign: 'right' }}>
-                          <div style={{ display: 'inline-flex', gap: '6px' }}>
-                            <button
-                              className="btn btn-secondary btn-sm"
-                              onClick={() => {
-                                setEditingUser(u);
-                                setEditData({ name: u.name, role: u.role, department: u.department, password: '' });
-                              }}
-                              style={{ padding: '4px 8px', fontSize: '12px' }}
-                            >
-                              Edit
-                            </button>
-                            {!isSelf && (
+                        <td style={{ padding: '14px 18px', textAlign: 'right' }}>
+                          <div style={{ display: 'inline-flex', gap: '8px', alignItems: 'center' }}>
+                            {canEdit ? (
+                              <button
+                                className="btn btn-secondary btn-sm"
+                                onClick={() => {
+                                  setEditingUser(u);
+                                  setEditData({ name: u.name, role: u.role, department: u.department, password: '' });
+                                }}
+                              >
+                                Edit
+                              </button>
+                            ) : null}
+                            {canDelete ? (
                               <button
                                 className="btn btn-danger-quiet btn-sm"
                                 onClick={() => setDeletingUser(u)}
-                                style={{ padding: '4px 8px', fontSize: '12px' }}
                               >
                                 Delete
                               </button>
-                            )}
+                            ) : (!isSelf && !isSuperadmin && isRowAdminOrSuper ? (
+                              <span style={{ fontSize: '11px', color: '#94a3b8', fontStyle: 'italic', paddingRight: '4px' }}>
+                                Admin Protected
+                              </span>
+                            ) : null)}
                           </div>
                         </td>
                       </tr>
@@ -436,121 +478,148 @@ export default function UserManagementScreen({ user }) {
 
       {/* TAB 2: DEPARTMENTS & ROLES */}
       {activeTab === 'depts_roles' && (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
-          {/* Departments Column */}
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-              <h3 style={{ fontSize: '16px', fontWeight: '600', color: '#0f172a' }}>
-                Plant Departments ({departments.length})
-              </h3>
-              <button
-                className="btn btn-secondary btn-sm"
-                onClick={() => setShowAddDeptModal(true)}
-              >
-                + New Department
-              </button>
+        <>
+          {!isSuperadmin && (
+            <div style={{
+              padding: '12px 16px',
+              background: '#f8fafc',
+              border: '1px solid #cbd5e1',
+              borderRadius: '8px',
+              marginBottom: '16px',
+              fontSize: '13px',
+              color: '#475569',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px',
+            }}>
+              <svg style={{ width: '18px', height: '18px', color: '#0284c7', flexShrink: 0 }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="12" cy="12" r="10" />
+                <line x1="12" y1="16" x2="12" y2="12" />
+                <line x1="12" y1="8" x2="12.01" y2="8" />
+              </svg>
+              <span>
+                <strong>Department Administrator Scope:</strong> Plant department topology and system roles are managed centrally by the Sovereign Root Superadmin. You have read-only visibility into operational roles.
+              </span>
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              {departments.map((d) => (
-                <div
-                  key={d.id || d.name}
-                  style={{
-                    padding: '12px 16px',
-                    background: '#ffffff',
-                    border: '1px solid rgba(0, 0, 0, 0.09)',
-                    borderRadius: '8px',
-                    boxShadow: '0 1px 2px rgba(0, 0, 0, 0.03)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    gap: '12px',
-                  }}
-                >
-                  <div>
-                    <div style={{ fontWeight: '600', color: '#0284c7', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.04em' }}>
-                      {d.name}
+          )}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
+            {/* Departments Column */}
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                <h3 style={{ fontSize: '16px', fontWeight: '600', color: '#0f172a' }}>
+                  Plant Departments ({departments.length})
+                </h3>
+                {isSuperadmin && (
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => setShowAddDeptModal(true)}
+                  >
+                    + New Department
+                  </button>
+                )}
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                {departments.map((d) => (
+                  <div
+                    key={d.id || d.name}
+                    style={{
+                      padding: '14px 18px',
+                      background: '#ffffff',
+                      border: '1px solid var(--border)',
+                      borderRadius: 'var(--radius)',
+                      boxShadow: 'var(--shadow-soft)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: '12px',
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontWeight: '600', color: '#0284c7', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.04em' }}>
+                        {d.name}
+                      </div>
+                      <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
+                        {d.description || 'No description provided.'}
+                      </div>
                     </div>
-                    <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
-                      {d.description || 'No description provided.'}
+                    <div>
+                      {d.name.toLowerCase() === 'general' ? (
+                        <span style={{ fontSize: '10px', color: '#64748b', background: '#f1f5f9', border: '1px solid #cbd5e1', padding: '3px 8px', borderRadius: 'var(--radius-pill)', fontWeight: '700' }}>
+                          PROTECTED
+                        </span>
+                      ) : isSuperadmin ? (
+                        <button
+                          className="btn btn-danger-quiet btn-sm"
+                          onClick={() => setDeletingDept(d)}
+                        >
+                          Delete
+                        </button>
+                      ) : null}
                     </div>
                   </div>
-                  <div>
-                    {d.name.toLowerCase() === 'general' ? (
-                      <span style={{ fontSize: '10px', color: '#64748b', background: '#f1f5f9', border: '1px solid #cbd5e1', padding: '2px 6px', borderRadius: '4px', fontWeight: '600' }}>
-                        PROTECTED
-                      </span>
-                    ) : (
-                      <button
-                        className="btn btn-danger-quiet btn-sm"
-                        onClick={() => setDeletingDept(d)}
-                        style={{ padding: '4px 8px', fontSize: '12px' }}
-                      >
-                        Delete
-                      </button>
-                    )}
-                  </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
-          </div>
 
-          {/* Roles Column */}
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-              <h3 style={{ fontSize: '16px', fontWeight: '600', color: '#0f172a' }}>
-                System Roles ({roles.length})
-              </h3>
-              <button
-                className="btn btn-secondary btn-sm"
-                onClick={() => setShowAddRoleModal(true)}
-              >
-                + New Role
-              </button>
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              {roles.map((r) => (
-                <div
-                  key={r.id || r.name}
-                  style={{
-                    padding: '12px 16px',
-                    background: '#ffffff',
-                    border: '1px solid rgba(0, 0, 0, 0.09)',
-                    borderRadius: '8px',
-                    boxShadow: '0 1px 2px rgba(0, 0, 0, 0.03)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    gap: '12px',
-                  }}
-                >
-                  <div>
-                    <div style={{ fontWeight: '600', color: '#7e22ce', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.04em' }}>
-                      {r.name}
+            {/* Roles Column */}
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                <h3 style={{ fontSize: '16px', fontWeight: '600', color: '#0f172a' }}>
+                  System Roles ({roles.length})
+                </h3>
+                {isSuperadmin && (
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => setShowAddRoleModal(true)}
+                  >
+                    + New Role
+                  </button>
+                )}
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                {roles.map((r) => (
+                  <div
+                    key={r.id || r.name}
+                    style={{
+                      padding: '14px 18px',
+                      background: '#ffffff',
+                      border: '1px solid var(--border)',
+                      borderRadius: 'var(--radius)',
+                      boxShadow: 'var(--shadow-soft)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: '12px',
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontWeight: '600', color: '#7e22ce', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.04em' }}>
+                        {r.name}
+                      </div>
+                      <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
+                        {r.description || 'Standard permission tier.'}
+                      </div>
                     </div>
-                    <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
-                      {r.description || 'Standard permission tier.'}
+                    <div>
+                      {['admin', 'superadmin'].includes(r.name.toLowerCase()) ? (
+                        <span style={{ fontSize: '10px', color: '#b91c1c', background: '#fee2e2', border: '1px solid #fca5a5', padding: '3px 8px', borderRadius: 'var(--radius-pill)', fontWeight: '700' }}>
+                          PROTECTED
+                        </span>
+                      ) : isSuperadmin ? (
+                        <button
+                          className="btn btn-danger-quiet btn-sm"
+                          onClick={() => setDeletingRole(r)}
+                        >
+                          Delete
+                        </button>
+                      ) : null}
                     </div>
                   </div>
-                  <div>
-                    {r.name.toLowerCase() === 'admin' ? (
-                      <span style={{ fontSize: '10px', color: '#b91c1c', background: '#fee2e2', border: '1px solid #fca5a5', padding: '2px 6px', borderRadius: '4px', fontWeight: '600' }}>
-                        PROTECTED
-                      </span>
-                    ) : (
-                      <button
-                        className="btn btn-danger-quiet btn-sm"
-                        onClick={() => setDeletingRole(r)}
-                        style={{ padding: '4px 8px', fontSize: '12px' }}
-                      >
-                        Delete
-                      </button>
-                    )}
-                  </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
           </div>
-        </div>
+        </>
       )}
 
       {/* MODAL: PROVISION USER */}
@@ -558,10 +627,12 @@ export default function UserManagementScreen({ user }) {
         <div className="auth-overlay" onClick={() => setShowProvisionModal(false)}>
           <div className="auth-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '440px', background: '#ffffff', color: '#0f172a' }}>
             <h3 style={{ fontSize: '18px', fontWeight: '600', marginBottom: '4px', color: '#0f172a' }}>
-              Provision Enterprise User
+              {isSuperadmin ? 'Provision Enterprise User' : `Provision ${userDept.toUpperCase()} User`}
             </h3>
             <p style={{ fontSize: '12px', color: '#64748b', marginBottom: '16px' }}>
-              Create an account with designated role and department routing.
+              {isSuperadmin
+                ? 'Create a platform account with site-wide role and departmental assignment.'
+                : `Provision an operational account strictly within the ${userDept.toUpperCase()} department.`}
             </p>
             <form onSubmit={handleProvisionUser} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               <div>
@@ -606,30 +677,36 @@ export default function UserManagementScreen({ user }) {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                 <div>
                   <label style={{ fontSize: '12px', color: '#334155', fontWeight: '500', marginBottom: '4px', display: 'block' }}>Role</label>
-                  <select
-                    className="auth-input"
-                    style={{ width: '100%', background: '#ffffff', color: '#0f172a', border: '1px solid #cbd5e1', cursor: 'pointer' }}
+                  <SovereignSelect
                     value={provisionData.role}
                     onChange={(e) => setProvisionData({ ...provisionData, role: e.target.value })}
-                  >
-                    {roles.map((r) => (
-                      <option key={r.name} value={r.name}>{r.name.toUpperCase()}</option>
-                    ))}
-                  </select>
+                    options={roles
+                      .filter((r) => isSuperadmin || !['admin', 'superadmin'].includes(r.name.toLowerCase()))
+                      .map((r) => ({ value: r.name, label: r.name.toUpperCase() }))}
+                    placeholder="Select Role"
+                    ariaLabel="Select Role"
+                  />
                 </div>
 
                 <div>
                   <label style={{ fontSize: '12px', color: '#334155', fontWeight: '500', marginBottom: '4px', display: 'block' }}>Department</label>
-                  <select
-                    className="auth-input"
-                    style={{ width: '100%', background: '#ffffff', color: '#0f172a', border: '1px solid #cbd5e1', cursor: 'pointer' }}
-                    value={provisionData.department}
-                    onChange={(e) => setProvisionData({ ...provisionData, department: e.target.value })}
-                  >
-                    {departments.map((d) => (
-                      <option key={d.name} value={d.name}>{d.name.toUpperCase()}</option>
-                    ))}
-                  </select>
+                  {isSuperadmin ? (
+                    <SovereignSelect
+                      value={provisionData.department}
+                      onChange={(e) => setProvisionData({ ...provisionData, department: e.target.value })}
+                      options={departments.map((d) => ({ value: d.name, label: d.name.toUpperCase() }))}
+                      placeholder="Select Department"
+                      ariaLabel="Select Department"
+                    />
+                  ) : (
+                    <input
+                      className="auth-input"
+                      style={{ width: '100%', background: '#f1f5f9', color: '#64748b', border: '1px solid #cbd5e1', cursor: 'not-allowed' }}
+                      type="text"
+                      disabled
+                      value={userDept.toUpperCase()}
+                    />
+                  )}
                 </div>
               </div>
 
@@ -671,30 +748,36 @@ export default function UserManagementScreen({ user }) {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                 <div>
                   <label style={{ fontSize: '12px', color: '#334155', fontWeight: '500', marginBottom: '4px', display: 'block' }}>Role</label>
-                  <select
-                    className="auth-input"
-                    style={{ width: '100%', background: '#ffffff', color: '#0f172a', border: '1px solid #cbd5e1', cursor: 'pointer' }}
+                  <SovereignSelect
                     value={editData.role}
                     onChange={(e) => setEditData({ ...editData, role: e.target.value })}
-                  >
-                    {roles.map((r) => (
-                      <option key={r.name} value={r.name}>{r.name.toUpperCase()}</option>
-                    ))}
-                  </select>
+                    options={roles
+                      .filter((r) => isSuperadmin || !['admin', 'superadmin'].includes(r.name.toLowerCase()))
+                      .map((r) => ({ value: r.name, label: r.name.toUpperCase() }))}
+                    placeholder="Select Role"
+                    ariaLabel="Select Role"
+                  />
                 </div>
 
                 <div>
                   <label style={{ fontSize: '12px', color: '#334155', fontWeight: '500', marginBottom: '4px', display: 'block' }}>Department</label>
-                  <select
-                    className="auth-input"
-                    style={{ width: '100%', background: '#ffffff', color: '#0f172a', border: '1px solid #cbd5e1', cursor: 'pointer' }}
-                    value={editData.department}
-                    onChange={(e) => setEditData({ ...editData, department: e.target.value })}
-                  >
-                    {departments.map((d) => (
-                      <option key={d.name} value={d.name}>{d.name.toUpperCase()}</option>
-                    ))}
-                  </select>
+                  {isSuperadmin ? (
+                    <SovereignSelect
+                      value={editData.department}
+                      onChange={(e) => setEditData({ ...editData, department: e.target.value })}
+                      options={departments.map((d) => ({ value: d.name, label: d.name.toUpperCase() }))}
+                      placeholder="Select Department"
+                      ariaLabel="Select Department"
+                    />
+                  ) : (
+                    <input
+                      className="auth-input"
+                      style={{ width: '100%', background: '#f1f5f9', color: '#64748b', border: '1px solid #cbd5e1', cursor: 'not-allowed' }}
+                      type="text"
+                      disabled
+                      value={(editData.department || userDept).toUpperCase()}
+                    />
+                  )}
                 </div>
               </div>
 
@@ -734,15 +817,17 @@ export default function UserManagementScreen({ user }) {
             style={{
               maxWidth: '440px',
               background: '#ffffff',
+              borderRadius: 'var(--radius-xl)',
               border: '1px solid rgba(239, 68, 68, 0.25)',
-              boxShadow: '0 24px 64px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.15)',
+              boxShadow: 'var(--shadow-modal)',
+              padding: '28px',
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '4px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '8px' }}>
               <div style={{
-                width: '44px',
-                height: '44px',
-                borderRadius: '50%',
+                width: '46px',
+                height: '46px',
+                borderRadius: 'var(--radius-pill)',
                 background: '#fee2e2',
                 border: '1px solid #fca5a5',
                 display: 'flex',
@@ -756,10 +841,10 @@ export default function UserManagementScreen({ user }) {
                 </svg>
               </div>
               <div>
-                <h3 style={{ fontSize: '18px', fontWeight: '600', color: '#0f172a', margin: 0 }}>
+                <h3 style={{ fontSize: '18px', fontWeight: '700', color: '#0f172a', margin: 0 }}>
                   Confirm User Deletion
                 </h3>
-                <p style={{ fontSize: '12px', color: '#dc2626', margin: '2px 0 0 0', fontWeight: '500' }}>
+                <p style={{ fontSize: '12px', color: '#dc2626', margin: '2px 0 0 0', fontWeight: '600' }}>
                   Permanent Action · Cannot be Undone
                 </p>
               </div>
@@ -768,12 +853,13 @@ export default function UserManagementScreen({ user }) {
             <div style={{
               background: '#f8fafc',
               border: '1px solid #e2e8f0',
-              borderRadius: '8px',
-              padding: '12px 16px',
+              borderRadius: 'var(--radius)',
+              padding: '14px 16px',
               fontSize: '13px',
               display: 'flex',
               flexDirection: 'column',
-              gap: '6px',
+              gap: '8px',
+              margin: '14px 0',
             }}>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <span style={{ color: '#64748b' }}>Account Name:</span>
@@ -785,17 +871,17 @@ export default function UserManagementScreen({ user }) {
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <span style={{ color: '#64748b' }}>Role & Department:</span>
-                <span style={{ textTransform: 'uppercase', fontSize: '11px', fontWeight: '600', letterSpacing: '0.04em', color: '#0284c7' }}>
+                <span style={{ textTransform: 'uppercase', fontSize: '11px', fontWeight: '700', letterSpacing: '0.04em', color: '#0284c7' }}>
                   {deletingUser.role} · {deletingUser.department}
                 </span>
               </div>
             </div>
 
-            <p style={{ fontSize: '13px', color: '#475569', lineHeight: '1.5', margin: 0 }}>
+            <p style={{ fontSize: '13px', color: '#475569', lineHeight: '1.5', margin: '0 0 16px' }}>
               Are you sure you want to permanently delete user <strong style={{ color: '#0f172a' }}>{deletingUser.email}</strong>? They will be immediately disconnected and prevented from logging in.
             </p>
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '8px' }}>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
               <button
                 type="button"
                 className="btn btn-secondary"
@@ -806,22 +892,9 @@ export default function UserManagementScreen({ user }) {
               </button>
               <button
                 type="button"
-                className="btn"
+                className="btn btn-danger"
                 onClick={confirmDeleteUser}
                 disabled={actionLoading}
-                style={{
-                  background: '#dc2626',
-                  color: '#ffffff',
-                  border: 'none',
-                  fontWeight: '600',
-                  padding: '8px 16px',
-                  borderRadius: '6px',
-                  cursor: actionLoading ? 'not-allowed' : 'pointer',
-                  opacity: actionLoading ? 0.7 : 1,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                }}
               >
                 {actionLoading ? 'Deleting…' : 'Yes, Delete User'}
               </button>
@@ -927,15 +1000,17 @@ export default function UserManagementScreen({ user }) {
             style={{
               maxWidth: '440px',
               background: '#ffffff',
+              borderRadius: 'var(--radius-xl)',
               border: '1px solid rgba(239, 68, 68, 0.25)',
-              boxShadow: '0 24px 64px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.15)',
+              boxShadow: 'var(--shadow-modal)',
+              padding: '28px',
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '4px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '8px' }}>
               <div style={{
-                width: '44px',
-                height: '44px',
-                borderRadius: '50%',
+                width: '46px',
+                height: '46px',
+                borderRadius: 'var(--radius-pill)',
                 background: '#fee2e2',
                 border: '1px solid #fca5a5',
                 display: 'flex',
@@ -949,10 +1024,10 @@ export default function UserManagementScreen({ user }) {
                 </svg>
               </div>
               <div>
-                <h3 style={{ fontSize: '18px', fontWeight: '600', color: '#0f172a', margin: 0 }}>
+                <h3 style={{ fontSize: '18px', fontWeight: '700', color: '#0f172a', margin: 0 }}>
                   Confirm Department Deletion
                 </h3>
-                <p style={{ fontSize: '12px', color: '#dc2626', margin: '2px 0 0 0', fontWeight: '500' }}>
+                <p style={{ fontSize: '12px', color: '#dc2626', margin: '2px 0 0 0', fontWeight: '600' }}>
                   Permanent Action · Cannot be Undone
                 </p>
               </div>
@@ -961,12 +1036,13 @@ export default function UserManagementScreen({ user }) {
             <div style={{
               background: '#f8fafc',
               border: '1px solid #e2e8f0',
-              borderRadius: '8px',
-              padding: '12px 16px',
+              borderRadius: 'var(--radius)',
+              padding: '14px 16px',
               fontSize: '13px',
               display: 'flex',
               flexDirection: 'column',
-              gap: '6px',
+              gap: '8px',
+              margin: '14px 0',
             }}>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <span style={{ color: '#64748b' }}>Department:</span>
@@ -978,12 +1054,12 @@ export default function UserManagementScreen({ user }) {
               </div>
             </div>
 
-            <p style={{ fontSize: '13px', color: '#475569', lineHeight: '1.5', margin: 0 }}>
+            <p style={{ fontSize: '13px', color: '#475569', lineHeight: '1.5', margin: '0 0 16px' }}>
               Are you sure you want to remove the <strong style={{ color: '#0f172a', textTransform: 'uppercase' }}>{deletingDept.name}</strong> department?
               If any active users are currently assigned to this department, deletion will be blocked until they are reassigned.
             </p>
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '8px' }}>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
               <button
                 type="button"
                 className="btn btn-secondary"
@@ -994,22 +1070,9 @@ export default function UserManagementScreen({ user }) {
               </button>
               <button
                 type="button"
-                className="btn"
+                className="btn btn-danger"
                 onClick={confirmDeleteDepartment}
                 disabled={actionLoading}
-                style={{
-                  background: '#dc2626',
-                  color: '#ffffff',
-                  border: 'none',
-                  fontWeight: '600',
-                  padding: '8px 16px',
-                  borderRadius: '6px',
-                  cursor: actionLoading ? 'not-allowed' : 'pointer',
-                  opacity: actionLoading ? 0.7 : 1,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                }}
               >
                 {actionLoading ? 'Deleting…' : 'Delete Department'}
               </button>
@@ -1027,15 +1090,17 @@ export default function UserManagementScreen({ user }) {
             style={{
               maxWidth: '440px',
               background: '#ffffff',
+              borderRadius: 'var(--radius-xl)',
               border: '1px solid rgba(239, 68, 68, 0.25)',
-              boxShadow: '0 24px 64px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.15)',
+              boxShadow: 'var(--shadow-modal)',
+              padding: '28px',
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '4px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '8px' }}>
               <div style={{
-                width: '44px',
-                height: '44px',
-                borderRadius: '50%',
+                width: '46px',
+                height: '46px',
+                borderRadius: 'var(--radius-pill)',
                 background: '#fee2e2',
                 border: '1px solid #fca5a5',
                 display: 'flex',
@@ -1049,10 +1114,10 @@ export default function UserManagementScreen({ user }) {
                 </svg>
               </div>
               <div>
-                <h3 style={{ fontSize: '18px', fontWeight: '600', color: '#0f172a', margin: 0 }}>
+                <h3 style={{ fontSize: '18px', fontWeight: '700', color: '#0f172a', margin: 0 }}>
                   Confirm Role Deletion
                 </h3>
-                <p style={{ fontSize: '12px', color: '#dc2626', margin: '2px 0 0 0', fontWeight: '500' }}>
+                <p style={{ fontSize: '12px', color: '#dc2626', margin: '2px 0 0 0', fontWeight: '600' }}>
                   Permanent Action · Cannot be Undone
                 </p>
               </div>
@@ -1061,12 +1126,13 @@ export default function UserManagementScreen({ user }) {
             <div style={{
               background: '#f8fafc',
               border: '1px solid #e2e8f0',
-              borderRadius: '8px',
-              padding: '12px 16px',
+              borderRadius: 'var(--radius)',
+              padding: '14px 16px',
               fontSize: '13px',
               display: 'flex',
               flexDirection: 'column',
-              gap: '6px',
+              gap: '8px',
+              margin: '14px 0',
             }}>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <span style={{ color: '#64748b' }}>Role:</span>
@@ -1078,12 +1144,12 @@ export default function UserManagementScreen({ user }) {
               </div>
             </div>
 
-            <p style={{ fontSize: '13px', color: '#475569', lineHeight: '1.5', margin: 0 }}>
+            <p style={{ fontSize: '13px', color: '#475569', lineHeight: '1.5', margin: '0 0 16px' }}>
               Are you sure you want to remove the <strong style={{ color: '#0f172a', textTransform: 'uppercase' }}>{deletingRole.name}</strong> role?
               If any active users currently hold this role, deletion will be blocked until they are reassigned.
             </p>
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '8px' }}>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
               <button
                 type="button"
                 className="btn btn-secondary"
@@ -1094,22 +1160,9 @@ export default function UserManagementScreen({ user }) {
               </button>
               <button
                 type="button"
-                className="btn"
+                className="btn btn-danger"
                 onClick={confirmDeleteRole}
                 disabled={actionLoading}
-                style={{
-                  background: '#dc2626',
-                  color: '#ffffff',
-                  border: 'none',
-                  fontWeight: '600',
-                  padding: '8px 16px',
-                  borderRadius: '6px',
-                  cursor: actionLoading ? 'not-allowed' : 'pointer',
-                  opacity: actionLoading ? 0.7 : 1,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                }}
               >
                 {actionLoading ? 'Deleting…' : 'Delete Role'}
               </button>

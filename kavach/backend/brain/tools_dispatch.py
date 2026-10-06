@@ -267,6 +267,7 @@ def dispatch_tool(
             prior_error=prior_error,
             timeout_seconds=CODE_TIMEOUT_SECONDS,
             task_id=state.get("task_id"),
+            user_stdin=state.get("user_stdin"),
         )
         is_error = not code_result["success"]
         if is_error:
@@ -332,10 +333,16 @@ def dispatch_tool(
             sources = structured.get("sources", [])
 
             is_code_doc = any(po.get("tool") in ("code", "calc") for po in state.get("step_outputs", [])) or "code" in str(state.get("shared_memory", "")).lower()
-            task_dept = "general"
-            if prior_sources:
+            # Department resolution hierarchy:
+            # 1. Explicit user department from state
+            # 2. Non-general department from prior retrieved sources
+            # 3. User department looked up by user_id from DB
+            # 4. Department extracted from query / task context (e.g. maintenance, process, hse, projects, finance)
+            # 5. Default to "general"
+            task_dept = state.get("user_department") or "general"
+            if task_dept == "general" and prior_sources:
                 for ps in prior_sources:
-                    if isinstance(ps, dict) and ps.get("department"):
+                    if isinstance(ps, dict) and ps.get("department") and ps["department"].lower() != "general":
                         task_dept = ps["department"]
                         break
             uid_str = state.get("user_id")
@@ -346,12 +353,18 @@ def dispatch_tool(
                     _db = SessionLocal()
                     try:
                         _u = _db.query(User).filter(User.id == uuid.UUID(str(uid_str))).first()
-                        if _u and _u.department:
+                        if _u and _u.department and _u.department.lower() != "general":
                             task_dept = _u.department
                     finally:
                         _db.close()
                 except Exception:
                     pass
+            if task_dept == "general":
+                task_text = f"{state.get('original_task', '')} {structured.get('title', '')}".lower()
+                for dept_candidate in ["maintenance", "process", "hse", "projects", "finance"]:
+                    if dept_candidate in task_text:
+                        task_dept = dept_candidate
+                        break
 
             if is_code_doc:
                 risk_info = {
@@ -393,6 +406,7 @@ def dispatch_tool(
                     "risk": risk_info["risk"],
                     "confidence": risk_info["confidence"],
                     "reasoning": risk_info["reasoning"],
+                    "department": task_dept,
                     "draft_content": structured,
                 }
             else:

@@ -316,12 +316,12 @@ def resolve_approval(
         user_role = getattr(approver_user, "role", None) or (approver_user.get("role") if isinstance(approver_user, dict) else None)
         user_dept = getattr(approver_user, "department", None) or (approver_user.get("department") if isinstance(approver_user, dict) else None)
 
-        if user_role not in ("approver", "admin"):
-            raise PermissionError(f"User with role '{user_role}' is not authorized to decide approvals. Required: approver or admin.")
+        if user_role not in ("approver", "admin", "superadmin"):
+            raise PermissionError(f"User with role '{user_role}' is not authorized to decide approvals. Required: approver, admin, or superadmin.")
 
         record_dept = record.get("department", "general")
-        if user_role == "approver" and record_dept and record_dept != "general" and user_dept != record_dept:
-            raise PermissionError(f"Approver from department '{user_dept}' cannot decide approvals for department '{record_dept}'.")
+        if user_role in ("approver", "admin") and user_dept != "general" and record_dept and record_dept != "general" and user_dept != record_dept:
+            raise PermissionError(f"{user_role.capitalize()} from department '{user_dept}' cannot decide approvals for department '{record_dept}'.")
 
     record["resolved_at"] = datetime.now(timezone.utc).isoformat()
     record["decision"] = decision_clean
@@ -416,10 +416,10 @@ def get_pending_approvals_count(current_user: Any, db: Any) -> int:
     user_role = getattr(current_user, "role", "engineer")
     user_dept = getattr(current_user, "department", "general")
 
-    if user_role not in ("approver", "admin"):
+    if user_role not in ("approver", "admin", "superadmin"):
         return 0
 
-    if user_role == "approver" and user_dept != "general":
+    if user_role in ("approver", "admin") and user_dept != "general":
         query = query.filter(or_(Approval.department == user_dept, Approval.department == "general", Approval.department.is_(None)))
 
     return query.count()
@@ -433,11 +433,11 @@ def list_pending_approvals_db(current_user: Any, db: Any) -> List[Dict[str, Any]
     user_role = getattr(current_user, "role", "engineer")
     user_dept = getattr(current_user, "department", "general")
 
-    if user_role not in ("approver", "admin"):
+    if user_role not in ("approver", "admin", "superadmin"):
         return []
 
     query = db.query(Approval).filter(Approval.status == "pending")
-    if user_role == "approver" and user_dept != "general":
+    if user_role in ("approver", "admin") and user_dept != "general":
         query = query.filter(or_(Approval.department == user_dept, Approval.department == "general", Approval.department.is_(None)))
 
     rows = query.order_by(Approval.requested_at.desc()).all()
@@ -502,11 +502,12 @@ def list_approval_history_db(current_user: Any, db: Any) -> List[Dict[str, Any]]
     user_role = getattr(current_user, "role", "engineer")
     user_dept = getattr(current_user, "department", "general")
 
-    if user_role not in ("approver", "admin", "auditor"):
+    if user_role not in ("approver", "admin", "auditor", "superadmin"):
         return []
 
     query = db.query(Approval).filter(Approval.status.in_(["approved", "rejected", "edited"]))
-    if user_role == "approver" and user_dept != "general":
+    is_global = user_role == "superadmin" or (user_role in ("auditor", "admin") and user_dept == "general")
+    if not is_global:
         query = query.filter(or_(Approval.department == user_dept, Approval.department == "general", Approval.department.is_(None)))
 
     rows = query.order_by(Approval.decided_at.desc(), Approval.requested_at.desc()).all()

@@ -15,6 +15,7 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
+import time
 import uuid
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -206,6 +207,7 @@ def run(
         history = req.history
 
     user_id_str = str(current_user.id) if current_user else None
+    user_dept_str = current_user.department if current_user else None
     agent_res = run_agent(
         req.task,
         attachment_type=req.attachment_type,
@@ -213,6 +215,7 @@ def run(
         history=history,
         initial_key_facts=initial_key_facts,
         user_id=user_id_str,
+        user_department=user_dept_str,
         vault_files=req.vault_files,
     )
 
@@ -300,12 +303,21 @@ async def run_stream(
     chat_id: Optional[str] = None,
     attachment_type: Optional[str] = None,
     vault_files: Optional[List[str]] = Query(None),
+    department: Optional[str] = Query(None),
+    user_id: Optional[str] = Query(None),
     current_user: Optional[User] = Depends(get_optional_user),
     db: Session = Depends(get_db),
 ):
     """Real-time SSE streaming endpoint for KAVACH autonomous agent execution."""
     if not task_id:
         task_id = str(uuid.uuid4())
+
+    effective_user = current_user
+    if not effective_user and user_id:
+        try:
+            effective_user = db.query(User).filter(User.id == uuid.UUID(str(user_id))).first()
+        except Exception:
+            effective_user = None
 
     parsed_vault_files: List[str] = []
     if vault_files:
@@ -325,18 +337,18 @@ async def run_stream(
     queue = register_task(task_id, loop)
 
     chat = None
-    if current_user:
+    if effective_user:
         if chat_id:
             try:
                 c_uuid = uuid.UUID(chat_id)
-                chat = db.query(Chat).filter(Chat.id == c_uuid, Chat.user_id == current_user.id).first()
+                chat = db.query(Chat).filter(Chat.id == c_uuid, Chat.user_id == effective_user.id).first()
             except Exception:
                 chat = None
         if not chat:
             clean_title = task.strip().split("\n")[0]
             if len(clean_title) > 40:
                 clean_title = clean_title[:37] + "..."
-            chat = Chat(user_id=current_user.id, title=clean_title or "New Chat", chat_type="general")
+            chat = Chat(user_id=effective_user.id, title=clean_title or "New Chat", chat_type="general")
             db.add(chat)
             db.commit()
             db.refresh(chat)
@@ -372,7 +384,8 @@ async def run_stream(
 
     chat_db_id = str(chat.id) if chat else None
     chat_db_title = chat.title if chat else None
-    user_id_str = str(current_user.id) if current_user else None
+    user_id_str = str(effective_user.id) if effective_user else (user_id or None)
+    user_dept_str = (effective_user.department if effective_user else None) or department or None
 
     def _execute_worker():
         worker_db = SessionLocal()
@@ -384,6 +397,7 @@ async def run_stream(
                 history=history,
                 initial_key_facts=initial_key_facts,
                 user_id=user_id_str,
+                user_department=user_dept_str,
                 vault_files=parsed_vault_files or None,
             )
 
@@ -520,11 +534,13 @@ def reply_to_agent(
     snapshot["operator_reply"] = req.reply
 
     user_id_str = str(current_user.id) if current_user else None
+    user_dept_str = current_user.department if current_user else None
     res = run_agent(
         task=req.reply,
         task_id=task_id,
         resume_state=snapshot,
         user_id=user_id_str,
+        user_department=user_dept_str,
     )
 
 
@@ -583,15 +599,31 @@ def reply_to_agent(
 
 
 
+_MODELS_CACHE: Dict[str, Any] = {"data": None, "timestamp": 0.0}
+
+
+def _invalidate_models_cache() -> None:
+    _MODELS_CACHE["data"] = None
+    _MODELS_CACHE["timestamp"] = 0.0
+
+
 @app.get("/models")
 def models():
+    now = time.time()
+    if _MODELS_CACHE["data"] is not None and (now - _MODELS_CACHE["timestamp"]) < 15.0:
+        return _MODELS_CACHE["data"]
+
     reg = registry.load_registry()
     try:
         installed = ollama.list_models()
     except Exception as exc:
         installed = []
         return {"registry": reg, "installed": installed, "warning": str(exc)}
-    return {"registry": reg, "installed": installed}
+
+    payload = {"registry": reg, "installed": installed}
+    _MODELS_CACHE["data"] = payload
+    _MODELS_CACHE["timestamp"] = now
+    return payload
 
 
 class ModelAssignRequest(BaseModel):
@@ -599,9 +631,10 @@ class ModelAssignRequest(BaseModel):
     model: str
 
 @app.post("/models/assign")
-def assign_model(req: ModelAssignRequest, current_user: User = Depends(require_role('admin'))):
+def assign_model(req: ModelAssignRequest, current_user: User = Depends(require_role('superadmin'))):
     try:
         new_reg = registry.set_model(req.role, req.model)
+        _invalidate_models_cache()
         return {"success": True, "registry": new_reg}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -631,23 +664,25 @@ async def pull_model_stream_endpoint(model: str):
     )
 
 @app.post("/models/pull/cancel")
-async def cancel_model_pull_endpoint(req: ModelCancelRequest):
+async def cancel_model_pull_endpoint(req: ModelCancelRequest, current_user: User = Depends(require_role('superadmin'))):
     """Cancels an ongoing model pull immediately."""
     cancelled = await ollama.cancel_pull_model(req.model)
     return {"success": True, "cancelled": cancelled, "model": req.model}
 
 @app.post("/models/pull")
-def pull_model_endpoint(req: ModelPullRequest):
+def pull_model_endpoint(req: ModelPullRequest, current_user: User = Depends(require_role('superadmin'))):
     try:
         ollama.pull_model(req.model)
+        _invalidate_models_cache()
         return {"success": True, "message": f"Successfully pulled {req.model}"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.delete("/models/{model_name:path}")
-def delete_model_endpoint(model_name: str, current_user: User = Depends(require_role('admin'))):
+def delete_model_endpoint(model_name: str, current_user: User = Depends(require_role('superadmin'))):
     try:
         ollama.delete_model(model_name)
+        _invalidate_models_cache()
         return {"success": True, "message": f"Successfully deleted {model_name}"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -679,17 +714,36 @@ def audit(
     task_id: Optional[str] = None,
     user_id: Optional[str] = None,
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
-    """Returns audit events. Admin/auditor can optionally view another user's events via ?user_id=."""
+    """Returns audit events. Superadmin, admin, or auditor can inspect events.
+    Department Admins and Department Auditors are strictly scoped to users in their own department.
+    Superadmin and Central Auditor ('general') can inspect site-wide user logs.
+    """
     target_user_id = str(current_user.id)
-    if user_id and current_user.role in ('admin', 'auditor'):
-        target_user_id = user_id
-        # Audit the admin override for viewing another user's log
+    if user_id and current_user.role in ('admin', 'auditor', 'superadmin'):
         if user_id != str(current_user.id):
+            is_superadmin = (current_user.role == "superadmin")
+            is_central_auditor = (current_user.role == "auditor" and current_user.department == "general")
+            if not (is_superadmin or is_central_auditor):
+                try:
+                    target_uuid = uuid.UUID(user_id)
+                except ValueError:
+                    raise HTTPException(status_code=400, detail="Invalid target user_id format.")
+                target_user = db.query(User).filter(User.id == target_uuid).first()
+                if not target_user:
+                    raise HTTPException(status_code=404, detail="Target user not found.")
+                if target_user.department != current_user.department:
+                    raise HTTPException(
+                        status_code=403,
+                        detail=f"Forbidden: You can only inspect audit logs for users within your department ('{current_user.department}').",
+                    )
+            target_user_id = user_id
+            # Audit the admin/auditor override for viewing another user's log
             log_event(
                 event_type="admin_override",
                 actor=str(current_user.id),
-                summary=f"Admin/auditor '{current_user.name}' viewed audit log of user {user_id}",
+                summary=f"{current_user.role.capitalize()} '{current_user.name}' viewed audit log of user {user_id}",
                 metadata={"action": "view_audit_log", "target_user_id": user_id},
                 external_calls=0,
                 user_id=str(current_user.id),
@@ -701,11 +755,28 @@ def audit(
 def verify_audit_chain_endpoint(
     user_id: Optional[str] = None,
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     """Verifies cryptographic SHA-256 hash-chain integrity of the audit log."""
     target_user_id = str(current_user.id)
-    if user_id and current_user.role in ('admin', 'auditor'):
-        target_user_id = user_id
+    if user_id and current_user.role in ('admin', 'auditor', 'superadmin'):
+        if user_id != str(current_user.id):
+            is_superadmin = (current_user.role == "superadmin")
+            is_central_auditor = (current_user.role == "auditor" and current_user.department == "general")
+            if not (is_superadmin or is_central_auditor):
+                try:
+                    target_uuid = uuid.UUID(user_id)
+                except ValueError:
+                    raise HTTPException(status_code=400, detail="Invalid target user_id format.")
+                target_user = db.query(User).filter(User.id == target_uuid).first()
+                if not target_user:
+                    raise HTTPException(status_code=404, detail="Target user not found.")
+                if target_user.department != current_user.department:
+                    raise HTTPException(
+                        status_code=403,
+                        detail=f"Forbidden: You can only verify audit chains for users within your department ('{current_user.department}').",
+                    )
+            target_user_id = user_id
 
     result = verify_chain(user_id=target_user_id)
     return result
@@ -719,7 +790,7 @@ class ApprovalRequest(BaseModel):
 
 @app.get("/approvals/count")
 def get_approvals_count_endpoint(
-    current_user: User = Depends(require_role("approver", "admin", "auditor")),
+    current_user: User = Depends(require_role("approver", "admin", "superadmin", "auditor")),
     db: Session = Depends(get_db),
 ):
     """Returns the count of pending approvals awaiting review for the user's role and department."""
@@ -728,16 +799,16 @@ def get_approvals_count_endpoint(
 
 @app.get("/approvals/pending")
 def get_pending_approvals_endpoint(
-    current_user: User = Depends(require_role("approver", "admin")),
+    current_user: User = Depends(require_role("approver", "admin", "superadmin")),
     db: Session = Depends(get_db),
 ):
-    """Lists pending approvals scoped to the user's department (or all for admin)."""
+    """Lists pending approvals scoped to the user's department (or all for superadmin/general)."""
     return list_pending_approvals_db(current_user, db)
 
 
 @app.get("/approvals/history")
 def get_approval_history_endpoint(
-    current_user: User = Depends(require_role("approver", "admin", "auditor")),
+    current_user: User = Depends(require_role("approver", "admin", "superadmin", "auditor")),
     db: Session = Depends(get_db),
 ):
     """Lists past resolved approvals with unified diffs, decisions, and requester details."""
@@ -756,7 +827,7 @@ def get_approval_endpoint(task_id: str):
 def post_approval_endpoint(
     task_id: str,
     req: ApprovalRequest,
-    current_user: User = Depends(require_role("approver", "admin")),
+    current_user: User = Depends(require_role("approver", "admin", "superadmin")),
     db: Session = Depends(get_db),
 ):
     log_gateway("POST /approval/{task_id}", task_id, f"Decision: '{req.decision}' by {current_user.email} ({current_user.role}/{current_user.department})")
@@ -769,12 +840,12 @@ def post_approval_endpoint(
         raise HTTPException(status_code=400, detail="Decision must be 'approve', 'reject', or 'edit'.")
 
     # Department-scoped approval routing:
-    # An approver can only decide approvals for their department (or general tasks)
+    # Approvers and Department Admins can only decide approvals for their department (or general tasks)
     task_dept = record.get("department", "general")
-    if current_user.role == "approver" and task_dept and task_dept != "general" and current_user.department != task_dept:
+    if current_user.role in ("approver", "admin") and current_user.department != "general" and task_dept and task_dept != "general" and current_user.department != task_dept:
         raise HTTPException(
             status_code=403,
-            detail=f"Approver from department '{current_user.department}' is not authorized to decide approvals for department '{task_dept}'.",
+            detail=f"{current_user.role.capitalize()} from department '{current_user.department}' is not authorized to decide approvals for department '{task_dept}'.",
         )
 
     try:
@@ -930,6 +1001,9 @@ def knowledge_upload(
 ):
     """Saves an uploaded document and (optionally) runs it through the existing
     Phase 4/7 ingestion pipeline for the authenticated user."""
+    if current_user.role == "auditor":
+        raise HTTPException(status_code=403, detail="Auditor persona is strictly read-only and cannot upload knowledge vault documents.")
+
     safe_name = Path(file.filename or "upload").name
     suffix = Path(safe_name).suffix.lower()
     if suffix not in SUPPORTED_EXTENSIONS:
@@ -966,12 +1040,23 @@ def knowledge_upload(
             "chunks_created": 0,
         }
 
+    # Enforce Department RBAC: Non-superadmins are strictly locked to their assigned department
+    effective_dept = department.strip().lower()
+    if current_user.role != "superadmin":
+        user_dept = (current_user.department or "general").strip().lower()
+        effective_dept = user_dept
+
+    # Enforce Classification RBAC: Restricted level is reserved for Approvers, Admins, and Superadmins
+    effective_classification = classification_level.strip().lower()
+    if effective_classification == "restricted" and current_user.role not in ("admin", "superadmin", "approver"):
+        effective_classification = "internal"
+
     try:
         result = ingest_document(
             dest,
             user_id=user_id_str,
-            department=department,
-            classification_level=classification_level,
+            department=effective_dept,
+            classification_level=effective_classification,
         )  # logs its own "document_ingested" audit event
         chunk_count = result.get("chunk_count", 0)
         return {
@@ -1001,6 +1086,9 @@ def knowledge_upload(
 @app.delete("/knowledge/{filename:path}")
 def knowledge_delete(filename: str, current_user: User = Depends(get_current_user)):
     """Deletes all chunks, embeddings, and BM25 index entries for a document and removes the file from disk for user."""
+    if current_user.role == "auditor":
+        raise HTTPException(status_code=403, detail="Auditor persona is strictly read-only and cannot delete knowledge vault documents.")
+
     safe_name = Path(filename).name
     user_id_str = str(current_user.id)
     try:
@@ -1024,13 +1112,13 @@ def shield_status():
 
 
 @app.post("/shield/lockdown")
-def shield_lockdown(elevate: bool = False, current_user: User = Depends(require_role('admin'))):
+def shield_lockdown(elevate: bool = False, current_user: User = Depends(require_role('superadmin', 'admin'))):
     result = enable_firewall_lockdown(elevate=elevate)
     return result
 
 
 @app.post("/shield/unlock")
-def shield_unlock(elevate: bool = False, current_user: User = Depends(require_role('admin'))):
+def shield_unlock(elevate: bool = False, current_user: User = Depends(require_role('superadmin', 'admin'))):
     result = disable_firewall_lockdown(elevate=elevate)
     return result
 

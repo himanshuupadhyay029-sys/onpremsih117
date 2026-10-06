@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import SovereignSelect from './SovereignSelect';
 
 const API_BASE = '';
 
@@ -10,10 +11,13 @@ function formatBytes(bytes) {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
+let _cachedRegistry = null;
+let _cachedInstalledModels = null;
+
 export default function ModelSettingsScreen() {
-  const [registry, setRegistry] = useState({});
-  const [installedModels, setInstalledModels] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [registry, setRegistry] = useState(() => _cachedRegistry || {});
+  const [installedModels, setInstalledModels] = useState(() => _cachedInstalledModels || []);
+  const [loading, setLoading] = useState(() => !_cachedRegistry);
   const [error, setError] = useState(null);
 
   // Model discovery & selection states
@@ -36,6 +40,10 @@ export default function ModelSettingsScreen() {
   const [modelToDelete, setModelToDelete] = useState(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState(null);
+
+  // Active dropdown open tracking for flawless z-index stacking
+  const [openRole, setOpenRole] = useState(null);
+  const [isVariantOpen, setIsVariantOpen] = useState(false);
 
   const abortControllerRef = useRef(null);
 
@@ -80,15 +88,19 @@ export default function ModelSettingsScreen() {
     return () => clearTimeout(timer);
   }, [pullModelName]);
 
-  const fetchModels = async () => {
+  const fetchModels = async (forceSpinner = false) => {
     try {
-      setLoading(true);
+      if (forceSpinner || !_cachedRegistry) {
+        setLoading(true);
+      }
       setError(null);
       const res = await fetch(`${API_BASE}/models`);
       if (!res.ok) throw new Error('Failed to fetch models');
       const data = await res.json();
-      setRegistry(data.registry || {});
-      setInstalledModels(data.installed || []);
+      _cachedRegistry = data.registry || {};
+      _cachedInstalledModels = data.installed || [];
+      setRegistry(_cachedRegistry);
+      setInstalledModels(_cachedInstalledModels);
       if (data.warning) {
         setError(data.warning);
       }
@@ -307,24 +319,36 @@ export default function ModelSettingsScreen() {
         <p className="section-desc">Select which installed model should handle each type of task.</p>
         
         <div className="role-assignments-grid">
-          {roles.map(role => (
-            <div className="role-row" key={role}>
-              <div className="role-label">{role.charAt(0).toUpperCase() + role.slice(1)}</div>
-              <select 
-                className="role-select" 
-                value={registry[role] || ''}
-                onChange={(e) => handleAssign(role, e.target.value)}
+          {roles.map(role => {
+            const roleOpts = [
+              ...(registry[role] && !installedModels.includes(registry[role])
+                ? [{ value: registry[role], label: `${registry[role]} (Not Installed)` }]
+                : []),
+              ...installedModels.map(m => ({ value: m, label: m })),
+            ];
+            const isThisRoleOpen = openRole === role;
+            return (
+              <div
+                className={`role-row ${isThisRoleOpen ? 'has-open-select' : ''}`}
+                key={role}
+                style={{
+                  position: 'relative',
+                  zIndex: isThisRoleOpen ? 200 : 1,
+                }}
               >
-                <option value="" disabled>Select a model...</option>
-                {registry[role] && !installedModels.includes(registry[role]) && (
-                  <option value={registry[role]}>{registry[role]} (Not Installed)</option>
-                )}
-                {installedModels.map(m => (
-                  <option key={m} value={m}>{m}</option>
-                ))}
-              </select>
-            </div>
-          ))}
+                <div className="role-label">{role.charAt(0).toUpperCase() + role.slice(1)}</div>
+                <SovereignSelect 
+                  value={registry[role] || ''}
+                  onChange={(e) => handleAssign(role, e.target.value)}
+                  onOpenChange={(isOpen) => setOpenRole(isOpen ? role : null)}
+                  options={roleOpts}
+                  placeholder="Select a model..."
+                  align="center"
+                  ariaLabel={`Model assignment for ${role}`}
+                />
+              </div>
+            );
+          })}
         </div>
       </div>
 
@@ -451,19 +475,19 @@ export default function ModelSettingsScreen() {
               </div>
             </div>
 
-            <div className="quant-selector-row">
-              <select 
-                className="role-select tag-dropdown"
+            <div className="quant-selector-row" style={{ position: 'relative', zIndex: isVariantOpen ? 150 : 10 }}>
+              <SovereignSelect 
                 value={selectedTag}
                 onChange={(e) => setSelectedTag(e.target.value)}
+                onOpenChange={(isOpen) => setIsVariantOpen(isOpen)}
+                options={filteredTags.map((t) => ({
+                  value: t.full_name,
+                  label: `${t.tag} • [${t.quantization}] • ${t.size}`,
+                }))}
                 disabled={isPulling}
-              >
-                {filteredTags.map((t) => (
-                  <option key={t.full_name} value={t.full_name}>
-                    {t.tag} &nbsp;•&nbsp; [{t.quantization}] &nbsp;•&nbsp; {t.size}
-                  </option>
-                ))}
-              </select>
+                placeholder="Select a variant..."
+                ariaLabel="Select model variant"
+              />
             </div>
 
             {/* Selected Summary Card */}
@@ -643,59 +667,41 @@ export default function ModelSettingsScreen() {
 
       <style dangerouslySetInnerHTML={{__html: `
         .model-settings-screen {
-          padding: 2rem;
-          max-width: 860px;
+          padding: 28px 24px;
+          max-width: 880px;
           margin: 0 auto;
         }
         .error-banner {
           background-color: rgba(239, 68, 68, 0.1);
           color: #ef4444;
-          padding: 1rem;
-          border-radius: 8px;
-          margin-bottom: 1.5rem;
-          border: 1px solid rgba(239, 68, 68, 0.2);
+          padding: 12px 18px;
+          border-radius: var(--radius-pill);
+          margin-bottom: 20px;
+          border: 1px solid rgba(239, 68, 68, 0.25);
+          font-size: 13.5px;
+          font-weight: 500;
         }
         .settings-section {
-          background-color: var(--surface-light);
-          border: 1px solid var(--border-light);
-          border-radius: 12px;
-          padding: 1.5rem;
-          margin-bottom: 2rem;
+          background: var(--bg-card);
+          border: 1px solid var(--border);
+          border-radius: var(--radius-lg);
+          padding: 24px 26px;
+          margin-bottom: 24px;
+          box-shadow: var(--shadow-card);
         }
         .section-desc {
-          color: var(--text-muted);
-          font-size: 0.9rem;
-          margin-top: 0.25rem;
-          margin-bottom: 1.5rem;
+          color: var(--text-secondary);
+          font-size: 13.5px;
+          margin-top: 4px;
+          margin-bottom: 20px;
+          line-height: 1.5;
         }
         .role-assignments-grid {
           display: flex;
           flex-direction: column;
-          gap: 1rem;
-        }
-        .role-row {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          padding: 0.75rem 1rem;
-          background-color: var(--surface);
-          border-radius: 8px;
-          border: 1px solid var(--border);
-        }
-        .role-label {
-          font-weight: 500;
-          color: var(--text);
-          flex: 1;
-        }
-        .role-select {
-          flex: 2;
-          padding: 0.6rem 0.75rem;
-          border-radius: 6px;
-          border: 1px solid var(--border);
-          background-color: var(--surface-light);
-          color: var(--text);
-          outline: none;
-          font-size: 0.95rem;
+          gap: 12px;
+          position: relative;
+          overflow: visible !important;
         }
         .installed-models-list {
           list-style: none;
@@ -703,51 +709,72 @@ export default function ModelSettingsScreen() {
           margin: 0;
           display: flex;
           flex-direction: column;
-          gap: 0.75rem;
+          gap: 10px;
         }
         .installed-model-item {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          padding: 0.75rem 1rem;
-          background-color: var(--surface);
-          border-radius: 8px;
+          padding: 12px 18px;
+          background: var(--bg-page);
+          border-radius: var(--radius);
           border: 1px solid var(--border);
+          box-shadow: var(--shadow-soft);
+          transition: transform 140ms var(--ease-spring), box-shadow 140ms var(--ease-spring);
+        }
+        .installed-model-item:hover {
+          transform: translateY(-1px);
+          box-shadow: var(--shadow-card);
         }
         .model-name {
-          font-weight: 500;
-          font-family: monospace;
-          color: var(--text);
+          font-weight: 600;
+          font-family: var(--font-mono, monospace);
+          color: var(--text-primary);
+          font-size: 13.5px;
         }
         .btn-danger {
-          background-color: rgba(239, 68, 68, 0.15);
+          background: rgba(239, 68, 68, 0.12);
           color: #ef4444;
           border: 1px solid rgba(239, 68, 68, 0.3);
-          padding: 0.5rem 0.75rem;
-          border-radius: 6px;
+          padding: 7px 16px;
+          border-radius: var(--radius-pill);
           cursor: pointer;
           display: inline-flex;
           align-items: center;
-          gap: 0.5rem;
-          font-weight: 500;
-          transition: all 0.2s;
+          gap: 6px;
+          font-weight: 600;
+          font-size: 13px;
+          transition: transform 140ms var(--ease-spring), box-shadow 140ms var(--ease-spring), background var(--ease);
         }
-        .btn-danger:hover {
-          background-color: rgba(239, 68, 68, 0.25);
+        .btn-danger:hover:not(:disabled) {
+          background: rgba(239, 68, 68, 0.22);
           border-color: #ef4444;
+          transform: translateY(-1px);
+          box-shadow: 0 4px 12px rgba(239, 68, 68, 0.2);
+        }
+        .btn-danger:active:not(:disabled) {
+          transform: scale(0.96) translateY(0.5px);
+          transition-duration: 70ms;
         }
         .btn-secondary {
-          background-color: var(--surface);
-          color: var(--text);
+          background: var(--bg-card);
+          color: var(--text-primary);
           border: 1px solid var(--border);
-          padding: 0.75rem 1.25rem;
-          border-radius: 8px;
+          padding: 9px 18px;
+          border-radius: var(--radius-pill);
           cursor: pointer;
           font-weight: 500;
-          transition: all 0.2s;
+          font-size: 13px;
+          transition: transform 140ms var(--ease-spring), box-shadow 140ms var(--ease-spring), background var(--ease);
         }
         .btn-secondary:hover:not(:disabled) {
-          background-color: var(--border-light);
+          background: var(--bg-hover);
+          transform: translateY(-1px);
+          box-shadow: var(--shadow-soft);
+        }
+        .btn-secondary:active:not(:disabled) {
+          transform: scale(0.96) translateY(0.5px);
+          transition-duration: 70ms;
         }
         .btn-secondary:disabled {
           opacity: 0.5;
@@ -757,8 +784,8 @@ export default function ModelSettingsScreen() {
         /* Search Bar */
         .model-search-bar {
           display: flex;
-          gap: 0.75rem;
-          margin-bottom: 1rem;
+          gap: 12px;
+          margin-bottom: 16px;
         }
         .search-input-wrapper {
           flex: 1;
@@ -768,59 +795,62 @@ export default function ModelSettingsScreen() {
         }
         .search-icon {
           position: absolute;
-          left: 1rem;
-          color: var(--text-muted);
+          left: 14px;
+          color: var(--text-tertiary);
           pointer-events: none;
         }
         .model-input {
           width: 100%;
-          padding: 0.75rem 1rem 0.75rem 2.6rem;
-          border-radius: 8px;
+          padding: 10px 16px 10px 42px;
+          border-radius: var(--radius-pill);
           border: 1px solid var(--border);
-          background-color: var(--surface);
-          color: var(--text);
-          font-size: 0.95rem;
+          background: var(--bg-page);
+          color: var(--text-primary);
+          font-size: 13.5px;
+          outline: none;
+          transition: border-color var(--ease), box-shadow var(--ease);
         }
         .model-input:focus {
-          border-color: var(--primary, #3b82f6);
-          outline: none;
+          border-color: var(--kavach-accent);
+          box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.15);
         }
         .input-spinner {
           position: absolute;
-          right: 1rem;
-          width: 1rem;
-          height: 1rem;
-          border: 2px solid rgba(255, 255, 255, 0.2);
-          border-top-color: var(--primary, #3b82f6);
+          right: 14px;
+          width: 16px;
+          height: 16px;
+          border: 2px solid rgba(2, 132, 199, 0.25);
+          border-top-color: var(--kavach-accent);
           border-radius: 50%;
           animation: spin 0.8s linear infinite;
         }
 
         /* Availability Status */
         .availability-status-container {
-          margin-bottom: 1.25rem;
+          margin-bottom: 18px;
         }
         .status-pill {
           display: inline-flex;
           align-items: center;
-          gap: 0.5rem;
-          padding: 0.4rem 0.85rem;
-          border-radius: 20px;
-          font-size: 0.88rem;
+          gap: 8px;
+          padding: 6px 14px;
+          border-radius: var(--radius-pill);
+          font-size: 13px;
+          font-weight: 500;
         }
         .status-checking {
-          background-color: rgba(59, 130, 246, 0.12);
-          color: #60a5fa;
-          border: 1px solid rgba(59, 130, 246, 0.25);
+          background-color: rgba(2, 132, 199, 0.1);
+          color: #0284c7;
+          border: 1px solid rgba(2, 132, 199, 0.25);
         }
         .status-available {
-          background-color: rgba(16, 185, 129, 0.12);
-          color: #34d399;
+          background-color: rgba(16, 185, 129, 0.1);
+          color: #059669;
           border: 1px solid rgba(16, 185, 129, 0.25);
         }
         .status-not-available {
-          background-color: rgba(239, 68, 68, 0.12);
-          color: #f87171;
+          background-color: rgba(239, 68, 68, 0.1);
+          color: #dc2626;
           border: 1px solid rgba(239, 68, 68, 0.25);
         }
         .pill-dot {
@@ -838,119 +868,92 @@ export default function ModelSettingsScreen() {
 
         /* Quant Panel */
         .quant-selection-panel {
-          background-color: var(--surface);
+          position: relative;
+          z-index: 10;
+          overflow: visible !important;
+          background: var(--bg-page);
           border: 1px solid var(--border);
-          border-radius: 10px;
-          padding: 1.25rem;
-          margin-bottom: 1.5rem;
+          border-radius: var(--radius-lg);
+          padding: 18px 20px;
+          margin-bottom: 20px;
         }
-        .quant-panel-header {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          flex-wrap: wrap;
-          gap: 0.75rem;
-          margin-bottom: 1rem;
-        }
-        .quant-panel-header h4 {
-          margin: 0;
-          font-size: 0.95rem;
-          font-weight: 600;
-        }
-        .filter-chips {
-          display: flex;
-          gap: 0.5rem;
-          flex-wrap: wrap;
-        }
-        .chip {
-          background-color: var(--surface-light);
-          border: 1px solid var(--border);
-          color: var(--text-muted);
-          padding: 0.25rem 0.65rem;
-          border-radius: 6px;
-          font-size: 0.8rem;
-          cursor: pointer;
-          transition: all 0.2s;
-        }
-        .chip:hover {
-          color: var(--text);
-          border-color: var(--border-light);
-        }
-        .chip.active {
-          background-color: rgba(59, 130, 246, 0.15);
-          color: #60a5fa;
-          border-color: rgba(59, 130, 246, 0.4);
-          font-weight: 600;
-        }
-        .tag-dropdown {
+        .quant-selector-row {
+          position: relative;
           width: 100%;
-          background-color: var(--surface-light);
-          padding: 0.75rem 1rem;
-          font-family: monospace;
-          font-size: 0.92rem;
+          max-width: 520px;
+          overflow: visible !important;
         }
         .selected-summary-card {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          background-color: var(--surface-light);
-          border: 1px solid var(--border-light);
-          border-radius: 8px;
-          padding: 0.85rem 1.2rem;
-          margin-top: 1rem;
-          gap: 1rem;
+          background: var(--bg-card);
+          border: 1px solid var(--border);
+          border-radius: var(--radius);
+          padding: 12px 18px;
+          margin-top: 14px;
+          gap: 14px;
         }
         .summary-col {
           display: flex;
           flex-direction: column;
-          gap: 0.2rem;
+          gap: 3px;
         }
         .summary-label {
-          font-size: 0.75rem;
-          color: var(--text-muted);
+          font-size: 11px;
+          color: var(--text-tertiary);
           text-transform: uppercase;
           letter-spacing: 0.5px;
+          font-weight: 600;
         }
         .summary-val {
-          font-size: 0.95rem;
-          color: var(--text);
+          font-size: 13.5px;
+          color: var(--text-primary);
         }
         .mono-highlight {
-          font-family: monospace;
-          color: #60a5fa;
+          font-family: var(--font-mono, monospace);
+          color: #0284c7;
+          font-weight: 600;
         }
         .summary-badge {
           display: inline-block;
-          background: rgba(59, 130, 246, 0.15);
-          color: #93c5fd;
-          padding: 0.15rem 0.5rem;
-          border-radius: 4px;
-          font-size: 0.82rem;
+          background: rgba(2, 132, 199, 0.12);
+          color: #0284c7;
+          padding: 2px 10px;
+          border-radius: var(--radius-pill);
+          font-size: 12px;
           font-weight: 600;
         }
 
         /* Action Buttons */
         .pull-action-area {
           display: flex;
-          gap: 1rem;
-          margin-bottom: 1.5rem;
+          gap: 12px;
+          margin-bottom: 20px;
         }
         .start-pull-btn {
           display: inline-flex;
           align-items: center;
-          gap: 0.5rem;
-          padding: 0.75rem 1.5rem;
+          gap: 8px;
+          padding: 10px 22px;
           font-weight: 600;
-          font-size: 0.95rem;
-          background-color: #3b82f6;
+          font-size: 13.5px;
+          background: linear-gradient(180deg, #0284c7 0%, #0369a1 100%);
           color: #fff;
-          border: none;
-          border-radius: 8px;
+          border: 1px solid rgba(2, 132, 199, 0.5);
+          box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25), 0 2px 8px rgba(2, 132, 199, 0.3);
+          border-radius: var(--radius-pill);
           cursor: pointer;
-          transition: background-color 0.2s, transform 0.1s;
+          transition: transform 160ms var(--ease-spring), box-shadow 160ms var(--ease-spring), background var(--ease);
         }
         .start-pull-btn:hover:not(:disabled) {
-          background-color: #2563eb;
+          background: linear-gradient(180deg, #0369a1 0%, #075985 100%);
+          transform: translateY(-1.5px);
+          box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), 0 4px 14px rgba(2, 132, 199, 0.4);
+        }
+        .start-pull-btn:active:not(:disabled) {
+          transform: scale(0.96) translateY(0.5px);
+          transition-duration: 70ms;
         }
         .start-pull-btn:disabled {
           opacity: 0.5;
@@ -959,102 +962,110 @@ export default function ModelSettingsScreen() {
         .stop-pull-btn {
           display: inline-flex;
           align-items: center;
-          gap: 0.5rem;
-          padding: 0.75rem 1.5rem;
+          gap: 8px;
+          padding: 10px 22px;
           font-weight: 600;
-          font-size: 0.95rem;
-          background-color: #dc2626;
+          font-size: 13.5px;
+          background: linear-gradient(180deg, #dc2626 0%, #b91c1c 100%);
           color: #ffffff;
-          border: none;
-          border-radius: 8px;
+          border: 1px solid rgba(220, 38, 38, 0.5);
+          border-radius: var(--radius-pill);
           cursor: pointer;
-          box-shadow: 0 0 12px rgba(220, 38, 38, 0.4);
-          transition: background-color 0.2s;
+          box-shadow: 0 2px 10px rgba(220, 38, 38, 0.35);
+          transition: transform 160ms var(--ease-spring), box-shadow 160ms var(--ease-spring), background var(--ease);
         }
         .stop-pull-btn:hover {
-          background-color: #b91c1c;
+          background: linear-gradient(180deg, #b91c1c 0%, #991b1b 100%);
+          transform: translateY(-1.5px);
+          box-shadow: 0 4px 14px rgba(220, 38, 38, 0.45);
+        }
+        .stop-pull-btn:active {
+          transform: scale(0.96) translateY(0.5px);
+          transition-duration: 70ms;
         }
 
         /* Live Progress Bar */
         .live-progress-container {
-          background-color: var(--surface);
+          background: var(--bg-card);
           border: 1px solid var(--border);
-          border-radius: 10px;
-          padding: 1.25rem;
+          border-radius: var(--radius-lg);
+          padding: 20px 24px;
           display: flex;
           flex-direction: column;
-          gap: 0.75rem;
+          gap: 12px;
+          box-shadow: var(--shadow-card);
         }
         .progress-info-row {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          font-size: 0.9rem;
+          font-size: 13px;
         }
         .progress-status {
           display: flex;
           align-items: center;
-          gap: 0.5rem;
-          color: var(--text);
-          font-family: monospace;
+          gap: 8px;
+          color: var(--text-primary);
+          font-family: var(--font-mono, monospace);
         }
         .progress-metrics {
           display: flex;
           align-items: center;
-          gap: 0.75rem;
+          gap: 10px;
         }
         .bytes-text {
-          color: var(--text-muted);
-          font-size: 0.85rem;
-          font-family: monospace;
+          color: var(--text-secondary);
+          font-size: 12px;
+          font-family: var(--font-mono, monospace);
         }
         .pct-badge {
-          background-color: rgba(59, 130, 246, 0.15);
-          color: #60a5fa;
-          padding: 0.2rem 0.5rem;
-          border-radius: 4px;
+          background-color: rgba(2, 132, 199, 0.12);
+          color: #0284c7;
+          padding: 3px 10px;
+          border-radius: var(--radius-pill);
           font-weight: 700;
-          font-family: monospace;
+          font-family: var(--font-mono, monospace);
+          font-size: 12px;
         }
         .progress-track {
           width: 100%;
           height: 10px;
-          background-color: var(--surface-light);
-          border-radius: 5px;
+          background-color: var(--bg-hover);
+          border-radius: var(--radius-pill);
           overflow: hidden;
           position: relative;
         }
         .progress-fill {
           height: 100%;
-          background: linear-gradient(90deg, #3b82f6, #60a5fa);
-          border-radius: 5px;
+          background: linear-gradient(90deg, #0284c7, #38bdf8);
+          border-radius: var(--radius-pill);
           transition: width 0.3s ease;
         }
         .fill-anim {
-          box-shadow: 0 0 10px rgba(59, 130, 246, 0.5);
+          box-shadow: 0 0 10px rgba(2, 132, 199, 0.5);
         }
         .fill-success {
           background: linear-gradient(90deg, #10b981, #34d399) !important;
         }
         .pull-error-msg {
-          color: #f87171;
-          font-size: 0.88rem;
-          padding-top: 0.25rem;
+          color: #ef4444;
+          font-size: 13px;
+          padding-top: 4px;
         }
         .pull-success-msg {
-          color: #34d399;
-          font-size: 0.88rem;
-          font-weight: 500;
-          padding-top: 0.25rem;
+          color: #10b981;
+          font-size: 13px;
+          font-weight: 600;
+          padding-top: 4px;
         }
 
         .spinner-tiny {
           display: inline-block;
-          width: 0.85rem;
-          height: 0.85rem;
-          border: 2px solid rgba(255, 255, 255, 0.2);
+          width: 14px;
+          height: 14px;
+          border: 2px solid rgba(2, 132, 199, 0.25);
           border-radius: 50%;
-          border-top-color: #60a5fa;
+          border-top-color: #0284c7;
           animation: spin 0.8s linear infinite;
         }
         @keyframes spin {

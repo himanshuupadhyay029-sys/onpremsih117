@@ -35,6 +35,7 @@ export default function MessageTurn({
   const [showReasoning, setShowReasoning] = useState(false);
   const [showThoughts, setShowThoughts] = useState(false);
   const [copiedAnswer, setCopiedAnswer] = useState(false);
+  const [showQuarantinedDraft, setShowQuarantinedDraft] = useState(false);
 
   // Extract turn properties whether from live streaming or persisted DB record
   const isUser = turn.role === 'user';
@@ -412,21 +413,98 @@ export default function MessageTurn({
               {approval.reasoning || 'Document generation paused for human review.'}
             </div>
 
-            {draftContent && (
-              <div className="approval-preview-box">
-                <div className="approval-draft-title">{draftContent.title || 'Document Draft'}</div>
-                {sourceNames.length > 0 && (
-                  <div className="approval-sources-line">
-                    <span className="doc-sources-label">Sources:</span>
-                    <span className="doc-sources-names">{sourceNames.join(', ')}</span>
+            {draftContent && !approvalOutcome[turn.task_id || meta.task_id]?.approved && (
+              <div className="approval-quarantine-box">
+                <div className="approval-quarantine-header">
+                  <div className="quarantine-pill">
+                    <svg className="icon" viewBox="0 0 24 24" width="13" height="13" aria-hidden="true">
+                      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" stroke="currentColor" fill="none" strokeWidth="2" />
+                    </svg>
+                    <span>Quarantined Deliverable</span>
                   </div>
-                )}
-                {(draftContent.sections || []).map((s, sIdx) => (
-                  <div key={sIdx} className="approval-sec">
-                    <div className="approval-sec-heading">{s.heading || `Section ${sIdx + 1}`}</div>
-                    <p className="approval-sec-body">{s.body || ''}</p>
+                  <div className="quarantine-meta-info">
+                    <span className="quarantine-title" title={draftContent.title || 'Technical Procedure Draft'}>
+                      {draftContent.title || 'Technical Procedure Draft'}
+                    </span>
+                    <span className="quarantine-count-chip">
+                      {(draftContent.sections || []).length} {((draftContent.sections || []).length === 1) ? 'section' : 'sections'} withheld
+                    </span>
                   </div>
-                ))}
+                </div>
+
+                <div className="quarantine-policy-callout">
+                  <svg className="icon" viewBox="0 0 24 24" width="15" height="15" style={{ flexShrink: 0, color: '#d97706' }} aria-hidden="true">
+                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" stroke="currentColor" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                    <line x1="12" y1="9" x2="12" y2="13" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                    <line x1="12" y1="17" x2="12.01" y2="17" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                  </svg>
+                  <span>
+                    <strong>Safety Backstop Active:</strong> Unapproved procedure instructions are held in quarantine to prevent unauthorized operational execution. Full procedure is locked pending supervisory sign-off.
+                  </span>
+                </div>
+
+                {(() => {
+                  const targetDept = approval.department || 'general';
+                  const isAuthorized = user && (
+                    user.role === 'admin' ||
+                    user.role === 'superadmin' ||
+                    (user.role === 'approver' && (targetDept === 'general' || user.department === targetDept))
+                  );
+
+                  if (isAuthorized) {
+                    return (
+                      <div className="quarantine-inspect-wrapper">
+                        <button
+                          type="button"
+                          className="btn-toggle-quarantine"
+                          onClick={() => setShowQuarantinedDraft((prev) => !prev)}
+                        >
+                          <svg className="icon" viewBox="0 0 24 24" width="13" height="13" aria-hidden="true">
+                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" stroke="currentColor" fill="none" strokeWidth="2" />
+                            <circle cx="12" cy="12" r="3" stroke="currentColor" fill="none" strokeWidth="2" />
+                          </svg>
+                          <span>
+                            {showQuarantinedDraft
+                              ? 'Hide Quarantined Draft ▲'
+                              : `Inspect Quarantined Draft (${(draftContent.sections || []).length} sections) ▼`}
+                          </span>
+                        </button>
+
+                        {showQuarantinedDraft && (
+                          <div className="quarantined-draft-body">
+                            <div className="quarantined-watermark-stripe">
+                              ⚠️ UNAPPROVED DRAFT — QUARANTINED FOR SUPERVISOR REVIEW ONLY — DO NOT EXECUTE
+                            </div>
+                            {sourceNames.length > 0 && (
+                              <div className="approval-sources-line">
+                                <span className="doc-sources-label">Vault Sources:</span>
+                                <span className="doc-sources-names">{sourceNames.join(', ')}</span>
+                              </div>
+                            )}
+                            {(draftContent.sections || []).map((s, sIdx) => (
+                              <div key={sIdx} className="approval-sec">
+                                <div className="approval-sec-heading">{s.heading || `Section ${sIdx + 1}`}</div>
+                                <p className="approval-sec-body">{s.body || ''}</p>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div className="quarantine-operator-notice">
+                      <svg className="icon" viewBox="0 0 24 24" width="13" height="13" style={{ flexShrink: 0 }} aria-hidden="true">
+                        <circle cx="12" cy="12" r="10" stroke="currentColor" fill="none" strokeWidth="2" />
+                        <path d="M12 8v4M12 16h.01" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                      </svg>
+                      <span>
+                        Awaiting sign-off by {targetDept !== 'general' ? `${targetDept} supervisor` : 'an authorized supervisor'} or admin. Procedure text is quarantined.
+                      </span>
+                    </div>
+                  );
+                })()}
               </div>
             )}
 
@@ -436,6 +514,7 @@ export default function MessageTurn({
                   const targetDept = approval.department || 'general';
                   const isAuthorized = user && (
                     user.role === 'admin' ||
+                    user.role === 'superadmin' ||
                     (user.role === 'approver' && (targetDept === 'general' || user.department === targetDept))
                   );
 
@@ -824,6 +903,16 @@ function InteractiveCodeCard({ run, cIdx }) {
   const displayLang = (currentItem ? currentItem.language : run.language) || 'python';
   const langName = displayLang === 'c' ? 'C' : displayLang === 'javascript' ? 'JavaScript' : 'Python';
 
+  const hasInteractiveInput = useMemo(() => {
+    return /input\(|sys\.stdin|scanf\(|readline\(/i.test(displayCode || '');
+  }, [displayCode]);
+
+  React.useEffect(() => {
+    if (hasInteractiveInput) {
+      setShowInputDrawer(true);
+    }
+  }, [hasInteractiveInput]);
+
   const activeData = executionResult || currentItem || run;
   const isErr = activeData.exit_code !== 0 || activeData.error;
   const duration = activeData.duration_seconds !== undefined ? `${activeData.duration_seconds}s` : '';
@@ -970,7 +1059,15 @@ function InteractiveCodeCard({ run, cIdx }) {
               <polyline points="4 17 10 11 4 5" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
               <line x1="12" y1="19" x2="20" y2="19" strokeWidth="2" strokeLinecap="round"/>
             </svg>
-            <span>{showInputDrawer ? "Hide Terminal Input (stdin)" : (userInput ? "Terminal Input (stdin): Active" : "Provide Input (stdin)")}</span>
+            <span>
+              {showInputDrawer
+                ? "Hide Terminal Input (stdin)"
+                : userInput
+                ? "Terminal Input (stdin): Active"
+                : hasInteractiveInput
+                ? "Terminal Input (stdin): Ready"
+                : "Provide Input (stdin)"}
+            </span>
           </button>
         </div>
 
@@ -1001,14 +1098,25 @@ function InteractiveCodeCard({ run, cIdx }) {
       {/* Stdin Drawer */}
       {showInputDrawer && (
         <div className="stdin-drawer">
-          <div className="stdin-header">
+          <div className="stdin-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
             <span className="stdin-title">Standard Input (stdin passed to script):</span>
+            {hasInteractiveInput && (
+              <span className="stdin-tag-badge" style={{ fontSize: '11px', color: 'var(--kavach-accent, #38bdf8)', background: 'rgba(56, 189, 248, 0.1)', padding: '2px 8px', borderRadius: '4px', border: '1px solid rgba(56, 189, 248, 0.25)' }}>
+                Input Expected
+              </span>
+            )}
           </div>
           <textarea
             className="stdin-textarea"
-            placeholder="Type input values here (e.g. name, values, lines of text to send to input())..."
+            placeholder={hasInteractiveInput ? "Type input value here (e.g. 10)... Click 'Run in Sandbox' below to execute" : "Type input values here (e.g. name, values, lines of text to send to input())..."}
             value={userInput}
             onChange={(e) => setUserInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                e.preventDefault();
+                handleRunInSandbox();
+              }
+            }}
             rows={2}
           />
         </div>

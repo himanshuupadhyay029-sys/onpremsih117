@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import SovereignSelect from './SovereignSelect';
 
 const API_BASE = '';
 
@@ -207,34 +208,36 @@ export default function AuthModal({ onClose, onAuthSuccess }) {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                 <div className="auth-field">
                   <label className="auth-label" htmlFor="auth-role">Role</label>
-                  <select
-                    className="auth-input"
+                  <SovereignSelect
                     id="auth-role"
                     value={role}
                     onChange={(e) => setRole(e.target.value)}
-                    style={{ cursor: 'pointer' }}
-                  >
-                    <option value="engineer">Engineer (Standard)</option>
-                    <option value="approver">Approver (Manager)</option>
-                    <option value="admin">Admin</option>
-                    <option value="auditor">Auditor</option>
-                  </select>
+                    options={[
+                      { value: 'engineer', label: 'Engineer (Standard)' },
+                      { value: 'approver', label: 'Approver (Manager)' },
+                      { value: 'admin', label: 'Admin' },
+                      { value: 'auditor', label: 'Auditor' },
+                    ]}
+                    placeholder="Select Role"
+                    ariaLabel="Select Role"
+                  />
                 </div>
 
                 <div className="auth-field">
                   <label className="auth-label" htmlFor="auth-department">Department</label>
-                  <select
-                    className="auth-input"
+                  <SovereignSelect
                     id="auth-department"
                     value={department}
                     onChange={(e) => setDepartment(e.target.value)}
-                    style={{ cursor: 'pointer' }}
-                  >
-                    <option value="general">General / Ops</option>
-                    <option value="process">Process</option>
-                    <option value="maintenance">Maintenance</option>
-                    <option value="hse">HSE</option>
-                  </select>
+                    options={[
+                      { value: 'general', label: 'General / Ops' },
+                      { value: 'process', label: 'Process' },
+                      { value: 'maintenance', label: 'Maintenance' },
+                      { value: 'hse', label: 'HSE' },
+                    ]}
+                    placeholder="Select Department"
+                    ariaLabel="Select Department"
+                  />
                 </div>
               </div>
             </>

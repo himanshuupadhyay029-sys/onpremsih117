@@ -38,10 +38,11 @@ def ensure_defaults(db):
             db.add(Department(name=d_name, description=d_desc))
 
     default_roles = [
-        ("engineer", "Standard operator and query analysis access"),
+        ("superadmin", "Sovereign Root / Plant CISO with platform-wide administrative authority"),
+        ("admin", "Department administrator with local user and operational authority"),
         ("approver", "Supervisor/manager with sign-off and approval gate authority"),
-        ("admin", "Full administrator with user, model and security management"),
         ("auditor", "Compliance auditor with complete read-only audit log access"),
+        ("engineer", "Standard operator and query analysis access"),
     ]
     for r_name, r_desc in default_roles:
         if not db.query(Role).filter(Role.name == r_name).first():
@@ -51,10 +52,11 @@ def ensure_defaults(db):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Create or promote an administrator account for KAVACH.")
+    parser = argparse.ArgumentParser(description="Create or promote a sovereign administrator account for KAVACH.")
     parser.add_argument("--email", help="Administrator email address")
     parser.add_argument("--password", help="Administrator password")
     parser.add_argument("--name", help="Administrator display name", default="System Administrator")
+    parser.add_argument("--role", help="Role to assign (superadmin or admin)", default="superadmin")
     parser.add_argument("--restore-defaults", action="store_true", help="Restore missing default departments and roles without modifying users")
     args = parser.parse_args()
 
@@ -69,7 +71,7 @@ def main():
         if args.restore_defaults:
             print("\n[+] System defaults verified and restored:")
             print("    Departments: general, process, maintenance, hse")
-            print("    Roles:       engineer, approver, admin, auditor\n")
+            print("    Roles:       superadmin, admin, approver, auditor, engineer\n")
             return
 
         email = args.email
@@ -90,6 +92,9 @@ def main():
                 break
 
         name = args.name or "System Administrator"
+        target_role = args.role.strip().lower() if args.role else "superadmin"
+        if target_role not in ("superadmin", "admin"):
+            target_role = "superadmin"
 
         email_clean = email.strip().lower()
         pwd_hash = hash_password(password)
@@ -98,33 +103,33 @@ def main():
         if existing:
             existing.name = name
             existing.password_hash = pwd_hash
-            existing.role = "admin"
+            existing.role = target_role
             existing.department = "general"
             db.commit()
-            action_desc = "promoted existing user to admin"
+            action_desc = f"promoted existing user to {target_role.upper()}"
             user_id = str(existing.id)
-            print(f"\n[+] Successfully updated existing user '{email_clean}' to ADMIN role.")
+            print(f"\n[+] Successfully updated existing user '{email_clean}' to {target_role.upper()} role.")
         else:
             new_admin = User(
                 name=name,
                 email=email_clean,
                 password_hash=pwd_hash,
-                role="admin",
+                role=target_role,
                 department="general",
             )
             db.add(new_admin)
             db.commit()
             db.refresh(new_admin)
-            action_desc = "created new admin account"
+            action_desc = f"created new {target_role} account"
             user_id = str(new_admin.id)
-            print(f"\n[+] Successfully created new ADMIN account: '{email_clean}'")
+            print(f"\n[+] Successfully created new {target_role.upper()} account: '{email_clean}'")
 
         # Record event in tamper-evident audit log
         log_event(
             event_type="admin_provision",
             actor="cli_bootstrap",
             summary=f"Administrator bootstrap: {action_desc} ({email_clean})",
-            metadata={"email": email_clean, "role": "admin", "department": "general", "user_id": user_id},
+            metadata={"email": email_clean, "role": target_role, "department": "general", "user_id": user_id},
             external_calls=0,
             user_id=user_id,
         )
@@ -133,7 +138,7 @@ def main():
         print(" Administrator Credentials Verified:")
         print(f"   Name:       {name}")
         print(f"   Email:      {email_clean}")
-        print(f"   Role:       admin")
+        print(f"   Role:       {target_role}")
         print(f"   Department: general")
         print("-" * 60)
         print("You can now sign in at http://localhost:3000 to manage users, roles, and plant departments.\n")
