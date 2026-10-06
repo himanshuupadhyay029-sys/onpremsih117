@@ -1532,6 +1532,7 @@ def run_agent(
     initial_key_facts: Optional[Dict[str, Any]] = None,
     resume_state: Optional[AgentState] = None,
     user_id: Optional[str] = None,
+    user_department: Optional[str] = None,
     vault_files: Optional[List[str]] = None,
 ) -> dict:
     if user_id:
@@ -1552,6 +1553,8 @@ def run_agent(
         initial_state["resumed"] = True
         initial_state["status"] = "executing"
         initial_state["clarify_question"] = None
+        if user_department:
+            initial_state["user_department"] = user_department
         if "key_facts" in initial_state and isinstance(initial_state["key_facts"], dict):
             initial_state["key_facts"] = dict(initial_state["key_facts"])
             initial_state["key_facts"].pop("needs_clarification", None)
@@ -1566,6 +1569,7 @@ def run_agent(
             "attachment_type": attachment_type,
             "vault_files": vault_files,
             "user_id": user_id,
+            "user_department": user_department,
             "routing_decision": None,
             "plan": [],
             "current_step": 0,
@@ -1611,6 +1615,7 @@ def run_agent(
                 "risk": step_output.get("risk"),
                 "confidence": step_output.get("confidence"),
                 "reasoning": step_output.get("reasoning"),
+                "department": step_output.get("department") or final_state.get("user_department") or "general",
             }
             draft_content = step_output.get("draft_content")
         if "file_path" in step_output and not step_output.get("awaiting_approval"):

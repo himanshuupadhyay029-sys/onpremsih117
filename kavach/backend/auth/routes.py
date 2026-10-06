@@ -23,7 +23,7 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 # Schemas
 # ---------------------------------------------------------------------------
 
-VALID_ROLES = ('engineer', 'approver', 'admin', 'auditor')
+VALID_ROLES = ('superadmin', 'admin', 'approver', 'auditor', 'engineer')
 VALID_DEPARTMENTS = ('process', 'maintenance', 'hse', 'projects', 'finance', 'general')
 
 
@@ -84,6 +84,7 @@ class UserUpdateRequest(BaseModel):
 def get_current_user(
     access_token: Optional[str] = Cookie(None),
     authorization: Optional[str] = Header(None),
+    kavach_explicit_logout: Optional[str] = Cookie(None),
     db: Session = Depends(get_db),
 ) -> User:
     """Extracts and validates the current user from the httpOnly cookie or Authorization header."""
@@ -92,6 +93,16 @@ def get_current_user(
         token = authorization.split("Bearer ", 1)[1].strip()
 
     if not token:
+        from backend.config import AUTO_LOGIN_SUPERADMIN
+        if AUTO_LOGIN_SUPERADMIN and not kavach_explicit_logout:
+            superadmin = (
+                db.query(User)
+                .filter((User.role == "superadmin") | (User.email == "admin@kavach.local"))
+                .first()
+            )
+            if superadmin:
+                return superadmin
+
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authentication required. No session cookie or token provided.",
@@ -120,11 +131,17 @@ def get_current_user(
 def get_optional_user(
     access_token: Optional[str] = Cookie(None),
     authorization: Optional[str] = Header(None),
+    kavach_explicit_logout: Optional[str] = Cookie(None),
     db: Session = Depends(get_db),
 ) -> Optional[User]:
     """Returns the authenticated user if present, or None if unauthenticated."""
     try:
-        return get_current_user(access_token=access_token, authorization=authorization, db=db)
+        return get_current_user(
+            access_token=access_token,
+            authorization=authorization,
+            kavach_explicit_logout=kavach_explicit_logout,
+            db=db,
+        )
     except HTTPException:
         return None
 
@@ -156,7 +173,7 @@ def register(
     user_count = db.query(User).count()
     if user_count > 0:
         caller = get_optional_user(access_token=access_token, authorization=authorization, db=db)
-        if not caller or caller.role != "admin":
+        if not caller or caller.role not in ("admin", "superadmin"):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Public self-registration is disabled. Please contact your system administrator to provision your account.",
@@ -173,8 +190,8 @@ def register(
             detail=f"An account with email '{email_clean}' already exists.",
         )
 
-    # First user is automatically admin, otherwise role requested
-    role_val = ('admin' if user_count == 0 else (req.role.strip().lower() if req.role else 'engineer'))
+    # First user is automatically superadmin, otherwise role requested
+    role_val = ('superadmin' if user_count == 0 else (req.role.strip().lower() if req.role else 'engineer'))
     dept_val = req.department.strip().lower() if req.department else 'general'
     if role_val not in VALID_ROLES:
         role_val = 'engineer'
@@ -223,7 +240,6 @@ def login(req: LoginRequest, response: Response, db: Session = Depends(get_db)):
         "department": user.department,
     })
     max_age = JWT_EXPIRATION_DAYS * 24 * 3600
-
     response.set_cookie(
         key="access_token",
         value=token,
@@ -233,6 +249,8 @@ def login(req: LoginRequest, response: Response, db: Session = Depends(get_db)):
         secure=False,  # Set to True when SSL/HTTPS is deployed
         path="/",
     )
+    # Clear explicit logout flag so user is actively authenticated
+    response.delete_cookie(key="kavach_explicit_logout", path="/")
 
     return UserResponse(
         id=str(user.id),
@@ -246,21 +264,90 @@ def login(req: LoginRequest, response: Response, db: Session = Depends(get_db)):
 
 @router.post("/logout")
 def logout(response: Response):
-    """Clears the session cookie."""
+    """Clears the session cookie and marks explicit logout."""
     response.delete_cookie(key="access_token", path="/")
+    response.set_cookie(
+        key="kavach_explicit_logout",
+        value="1",
+        httponly=True,
+        samesite="lax",
+        path="/",
+    )
     return {"message": "Logged out successfully"}
 
 
 @router.get("/me", response_model=UserResponse)
-def me(current_user: User = Depends(get_current_user)):
-    """Returns the authenticated user profile."""
-    return UserResponse(
-        id=str(current_user.id),
-        name=current_user.name,
-        email=current_user.email,
-        role=current_user.role,
-        department=current_user.department,
-        created_at=current_user.created_at.isoformat(),
+def me(
+    response: Response,
+    access_token: Optional[str] = Cookie(None),
+    authorization: Optional[str] = Header(None),
+    kavach_explicit_logout: Optional[str] = Cookie(None),
+    db: Session = Depends(get_db),
+):
+    """Returns the authenticated user profile.
+    If AUTO_LOGIN_SUPERADMIN is enabled and no session exists (and user didn't explicitly log out),
+    automatically authenticates as superadmin.
+    """
+    token = access_token
+    if not token and authorization and authorization.startswith("Bearer "):
+        token = authorization.split("Bearer ", 1)[1].strip()
+
+    if token:
+        payload = decode_access_token(token)
+        if payload and "sub" in payload:
+            try:
+                user_uuid = uuid.UUID(payload["sub"])
+                user = db.query(User).filter(User.id == user_uuid).first()
+                if user:
+                    return UserResponse(
+                        id=str(user.id),
+                        name=user.name,
+                        email=user.email,
+                        role=user.role,
+                        department=user.department,
+                        created_at=user.created_at.isoformat(),
+                    )
+            except Exception:
+                pass
+
+    # If no valid token found, check AUTO_LOGIN_SUPERADMIN
+    from backend.config import AUTO_LOGIN_SUPERADMIN
+    if AUTO_LOGIN_SUPERADMIN and not kavach_explicit_logout:
+        superadmin = (
+            db.query(User)
+            .filter((User.role == "superadmin") | (User.email == "admin@kavach.local"))
+            .first()
+        )
+        if superadmin:
+            token = create_access_token({
+                "sub": str(superadmin.id),
+                "email": superadmin.email,
+                "name": superadmin.name,
+                "role": superadmin.role,
+                "department": superadmin.department,
+            })
+            max_age = JWT_EXPIRATION_DAYS * 24 * 3600
+            response.set_cookie(
+                key="access_token",
+                value=token,
+                max_age=max_age,
+                httponly=True,
+                samesite="lax",
+                secure=False,
+                path="/",
+            )
+            return UserResponse(
+                id=str(superadmin.id),
+                name=superadmin.name,
+                email=superadmin.email,
+                role=superadmin.role,
+                department=superadmin.department,
+                created_at=superadmin.created_at.isoformat(),
+            )
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Authentication required. No session cookie or token provided.",
     )
 
 
@@ -280,10 +367,10 @@ def list_departments(db: Session = Depends(get_db)):
 @router.post("/departments", status_code=status.HTTP_201_CREATED)
 def create_department(
     req: DepartmentCreate,
-    current_user: User = Depends(require_role("admin")),
+    current_user: User = Depends(require_role("superadmin")),
     db: Session = Depends(get_db),
 ):
-    """Creates a new plant department (Admin only)."""
+    """Creates a new plant department (Superadmin only)."""
     clean_name = req.name.strip().lower()
     if not clean_name:
         raise HTTPException(status_code=400, detail="Department name cannot be blank.")
@@ -298,8 +385,8 @@ def create_department(
 
     log_event(
         event_type="department_created",
-        actor=f"admin:{current_user.email}",
-        summary=f"Admin created department '{clean_name}'",
+        actor=f"superadmin:{current_user.email}",
+        summary=f"Superadmin created department '{clean_name}'",
         metadata={"name": clean_name, "description": req.description},
         user_id=str(current_user.id),
     )
@@ -309,10 +396,10 @@ def create_department(
 @router.delete("/departments/{dept_id}")
 def delete_department(
     dept_id: str,
-    current_user: User = Depends(require_role("admin")),
+    current_user: User = Depends(require_role("superadmin")),
     db: Session = Depends(get_db),
 ):
-    """Deletes a plant department (Admin only). 'general' and departments with assigned users cannot be deleted."""
+    """Deletes a plant department (Superadmin only). 'general' and departments with assigned users cannot be deleted."""
     dept = None
     try:
         uid = uuid.UUID(dept_id)
@@ -342,8 +429,8 @@ def delete_department(
 
     log_event(
         event_type="department_deleted",
-        actor=f"admin:{current_user.email}",
-        summary=f"Admin '{current_user.email}' deleted department '{dept_name}'",
+        actor=f"superadmin:{current_user.email}",
+        summary=f"Superadmin '{current_user.email}' deleted department '{dept_name}'",
         metadata={"department": dept_name},
         user_id=str(current_user.id),
     )
@@ -362,10 +449,10 @@ def list_roles(db: Session = Depends(get_db)):
 @router.post("/roles", status_code=status.HTTP_201_CREATED)
 def create_role(
     req: RoleCreate,
-    current_user: User = Depends(require_role("admin")),
+    current_user: User = Depends(require_role("superadmin")),
     db: Session = Depends(get_db),
 ):
-    """Creates a new operational role (Admin only)."""
+    """Creates a new operational role (Superadmin only)."""
     clean_name = req.name.strip().lower()
     if not clean_name:
         raise HTTPException(status_code=400, detail="Role name cannot be blank.")
@@ -380,8 +467,8 @@ def create_role(
 
     log_event(
         event_type="role_created",
-        actor=f"admin:{current_user.email}",
-        summary=f"Admin created role '{clean_name}'",
+        actor=f"superadmin:{current_user.email}",
+        summary=f"Superadmin created role '{clean_name}'",
         metadata={"name": clean_name, "description": req.description},
         user_id=str(current_user.id),
     )
@@ -391,10 +478,10 @@ def create_role(
 @router.delete("/roles/{role_id}")
 def delete_role(
     role_id: str,
-    current_user: User = Depends(require_role("admin")),
+    current_user: User = Depends(require_role("superadmin")),
     db: Session = Depends(get_db),
 ):
-    """Deletes an operational role (Admin only). 'admin' and roles with assigned users cannot be deleted."""
+    """Deletes an operational role (Superadmin only). 'superadmin', 'admin' and roles with assigned users cannot be deleted."""
     role = None
     try:
         uid = uuid.UUID(role_id)
@@ -405,10 +492,10 @@ def delete_role(
     if not role:
         raise HTTPException(status_code=404, detail="Role not found.")
 
-    if role.name.lower() == "admin":
+    if role.name.lower() in ("admin", "superadmin"):
         raise HTTPException(
             status_code=400,
-            detail="The system 'admin' role is protected and cannot be deleted.",
+            detail=f"The system '{role.name}' role is protected and cannot be deleted.",
         )
 
     assigned_count = db.query(User).filter(User.role == role.name).count()
@@ -424,8 +511,8 @@ def delete_role(
 
     log_event(
         event_type="role_deleted",
-        actor=f"admin:{current_user.email}",
-        summary=f"Admin '{current_user.email}' deleted role '{role_name}'",
+        actor=f"superadmin:{current_user.email}",
+        summary=f"Superadmin '{current_user.email}' deleted role '{role_name}'",
         metadata={"role": role_name},
         user_id=str(current_user.id),
     )
@@ -438,11 +525,16 @@ def delete_role(
 
 @router.get("/users", response_model=List[UserResponse])
 def list_users(
-    current_user: User = Depends(require_role("admin", "auditor")),
+    current_user: User = Depends(require_role("superadmin", "admin", "auditor")),
     db: Session = Depends(get_db),
 ):
-    """Lists all provisioned users (Admin and Auditor only)."""
-    users = db.query(User).order_by(User.created_at.desc()).all()
+    """Lists provisioned users scoped to role and department."""
+    if current_user.role == "superadmin" or (current_user.role == "auditor" and current_user.department == "general"):
+        users = db.query(User).order_by(User.created_at.desc()).all()
+    else:
+        # Department Admin or Department Auditor: strictly scoped to own department
+        users = db.query(User).filter(User.department == current_user.department).order_by(User.created_at.desc()).all()
+
     return [
         UserResponse(
             id=str(u.id),
@@ -459,13 +551,32 @@ def list_users(
 @router.post("/users", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 def provision_user(
     req: UserProvisionRequest,
-    current_user: User = Depends(require_role("admin")),
+    current_user: User = Depends(require_role("superadmin", "admin")),
     db: Session = Depends(get_db),
 ):
-    """Provisions a new employee account (Admin only)."""
+    """Provisions a new employee account. Superadmin can provision anywhere; Department Admin can only provision non-admin roles in their own department."""
     email_clean = req.email.strip().lower()
     if not email_clean or not req.password:
         raise HTTPException(status_code=400, detail="Email and password cannot be blank.")
+
+    role_clean = req.role.strip().lower() if req.role else "engineer"
+    dept_clean = req.department.strip().lower() if req.department else "general"
+
+    if role_clean not in VALID_ROLES:
+        raise HTTPException(status_code=400, detail=f"Invalid role '{role_clean}'. Must be one of: {', '.join(VALID_ROLES)}.")
+
+    # Department Admin restrictions
+    if current_user.role == "admin":
+        if dept_clean != current_user.department:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Department administrators can only provision users within their own department ('{current_user.department}').",
+            )
+        if role_clean in ("admin", "superadmin"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Department administrators cannot provision admin or superadmin accounts.",
+            )
 
     existing = db.query(User).filter(User.email == email_clean).first()
     if existing:
@@ -479,8 +590,8 @@ def provision_user(
         name=req.name.strip() or email_clean.split("@")[0],
         email=email_clean,
         password_hash=pwd_hash,
-        role=req.role.strip().lower() if req.role else "engineer",
-        department=req.department.strip().lower() if req.department else "general",
+        role=role_clean,
+        department=dept_clean,
     )
     db.add(user)
     db.commit()
@@ -488,8 +599,8 @@ def provision_user(
 
     log_event(
         event_type="user_provisioned",
-        actor=f"admin:{current_user.email}",
-        summary=f"Admin '{current_user.email}' provisioned user '{user.name}' ({user.email}) as role='{user.role}', dept='{user.department}'",
+        actor=f"{current_user.role}:{current_user.email}",
+        summary=f"{current_user.role.capitalize()} '{current_user.email}' provisioned user '{user.name}' ({user.email}) as role='{user.role}', dept='{user.department}'",
         metadata={"user_id": str(user.id), "email": user.email, "role": user.role, "department": user.department},
         user_id=str(current_user.id),
     )
@@ -508,10 +619,10 @@ def provision_user(
 def update_user(
     user_id: str,
     req: UserUpdateRequest,
-    current_user: User = Depends(require_role("admin")),
+    current_user: User = Depends(require_role("superadmin", "admin")),
     db: Session = Depends(get_db),
 ):
-    """Updates user role, department, name, or password (Admin only)."""
+    """Updates user role, department, name, or password. Subject to departmental boundary enforcement."""
     try:
         uid = uuid.UUID(user_id)
     except ValueError:
@@ -521,10 +632,36 @@ def update_user(
     if not user:
         raise HTTPException(status_code=404, detail="User not found.")
 
+    # Department Admin restrictions
+    if current_user.role == "admin":
+        if user.department != current_user.department:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Department administrators cannot modify users outside their department ('{current_user.department}').",
+            )
+        if user.role in ("admin", "superadmin") and str(user.id) != str(current_user.id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Department administrators cannot modify other admin or superadmin accounts.",
+            )
+        if req.department is not None and req.department.strip().lower() != current_user.department:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Department administrators cannot reassign users to other departments.",
+            )
+        if req.role is not None and req.role.strip().lower() in ("admin", "superadmin"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Department administrators cannot promote users to admin or superadmin.",
+            )
+
     if req.name is not None and req.name.strip():
         user.name = req.name.strip()
     if req.role is not None and req.role.strip():
-        user.role = req.role.strip().lower()
+        role_clean = req.role.strip().lower()
+        if role_clean not in VALID_ROLES:
+            raise HTTPException(status_code=400, detail=f"Invalid role '{role_clean}'.")
+        user.role = role_clean
     if req.department is not None and req.department.strip():
         user.department = req.department.strip().lower()
     if req.password is not None and req.password.strip():
@@ -535,8 +672,8 @@ def update_user(
 
     log_event(
         event_type="user_updated",
-        actor=f"admin:{current_user.email}",
-        summary=f"Admin '{current_user.email}' updated user '{user.email}' (role={user.role}, dept={user.department})",
+        actor=f"{current_user.role}:{current_user.email}",
+        summary=f"{current_user.role.capitalize()} '{current_user.email}' updated user '{user.email}' (role={user.role}, dept={user.department})",
         metadata={"user_id": str(user.id), "email": user.email, "role": user.role, "department": user.department},
         user_id=str(current_user.id),
     )
@@ -554,10 +691,10 @@ def update_user(
 @router.delete("/users/{user_id}")
 def delete_user(
     user_id: str,
-    current_user: User = Depends(require_role("admin")),
+    current_user: User = Depends(require_role("superadmin", "admin")),
     db: Session = Depends(get_db),
 ):
-    """Deletes an account (Admin only). Cannot delete oneself."""
+    """Deletes an account. Self-deletion and cross-admin deletions are strictly prohibited."""
     if str(current_user.id) == user_id:
         raise HTTPException(status_code=400, detail="You cannot delete your own administrative account.")
 
@@ -570,14 +707,33 @@ def delete_user(
     if not user:
         raise HTTPException(status_code=404, detail="User not found.")
 
+    # Root superadmin protection: cannot delete if only 1 remains
+    if user.role == "superadmin":
+        superadmin_count = db.query(User).filter(User.role == "superadmin").count()
+        if superadmin_count <= 1:
+            raise HTTPException(status_code=400, detail="The root superadmin account is protected and cannot be deleted.")
+
+    # Department Admin restrictions
+    if current_user.role == "admin":
+        if user.department != current_user.department:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Department administrators cannot delete users outside their department ('{current_user.department}').",
+            )
+        if user.role in ("admin", "superadmin"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Department administrators cannot delete admin or superadmin accounts.",
+            )
+
     user_email = user.email
     db.delete(user)
     db.commit()
 
     log_event(
         event_type="user_deleted",
-        actor=f"admin:{current_user.email}",
-        summary=f"Admin '{current_user.email}' deleted user '{user_email}'",
+        actor=f"{current_user.role}:{current_user.email}",
+        summary=f"{current_user.role.capitalize()} '{current_user.email}' deleted user '{user_email}'",
         metadata={"user_id": user_id, "email": user_email},
         user_id=str(current_user.id),
     )

@@ -370,7 +370,7 @@ class TestPartB_ApprovalRouting:
             )
 
         assert "not authorized" in str(exc_info.value).lower()
-        assert "approver or admin" in str(exc_info.value).lower()
+        assert "approver" in str(exc_info.value).lower() and ("superadmin" in str(exc_info.value).lower() or "admin" in str(exc_info.value).lower())
 
     def test_approver_cross_department_rejected(self):
         """An approver from department 'maintenance' cannot approve a 'process' task."""
@@ -637,6 +637,164 @@ class TestPartC_AuditChain:
             assert report["valid"] is True
             assert report["total_entries"] == 0
             assert report["verified_count"] == 0
+
+
+# ============================================================================
+# Part D Tests — Superadmin & Department Admin Sovereign Hierarchy
+# ============================================================================
+
+class TestSuperadminAndDepartmentAdminIsolation:
+    """Verifies sovereign root hierarchy, separation of duties, and department boundaries."""
+
+    def test_superadmin_can_decide_any_department_approval(self):
+        """Superadmin has site-wide authority and can decide approvals across all departments."""
+        from backend.guard.approve import request_approval, resolve_approval
+
+        task_id = f"test-sa-{uuid.uuid4()}"
+        request_approval(
+            task_id=task_id,
+            document_content={"title": "Turbine Valve Calibration", "sections": []},
+            risk_assessment={"risk": "high", "department": "maintenance"},
+            department="maintenance",
+        )
+
+        mock_superadmin = MagicMock()
+        mock_superadmin.id = str(uuid.uuid4())
+        mock_superadmin.role = "superadmin"
+        mock_superadmin.department = "general"
+        mock_superadmin.email = "ciso@kavach.local"
+
+        res = resolve_approval(task_id=task_id, decision="approve", approver_user=mock_superadmin)
+        assert res["status"] == "approved"
+        assert res["decision"] == "approve"
+
+    def test_dept_admin_cannot_decide_cross_department_approval(self):
+        """A Department Admin from 'maintenance' cannot decide approvals for 'process'."""
+        from backend.guard.approve import request_approval, resolve_approval
+
+        task_id = f"test-cross-dept-{uuid.uuid4()}"
+        request_approval(
+            task_id=task_id,
+            document_content={"title": "Cracker Furnace Operating Guide", "sections": []},
+            risk_assessment={"risk": "high", "department": "process"},
+            department="process",
+        )
+
+        mock_dept_admin = MagicMock()
+        mock_dept_admin.id = str(uuid.uuid4())
+        mock_dept_admin.role = "admin"
+        mock_dept_admin.department = "maintenance"
+        mock_dept_admin.email = "admin.maint@kavach.local"
+
+        with pytest.raises(PermissionError) as exc_info:
+            resolve_approval(task_id=task_id, decision="approve", approver_user=mock_dept_admin)
+
+        assert "cannot decide approvals for department 'process'" in str(exc_info.value).lower()
+
+    def test_dept_admin_can_decide_own_department_approval(self):
+        """A Department Admin from 'maintenance' can decide approvals for 'maintenance'."""
+        from backend.guard.approve import request_approval, resolve_approval
+
+        task_id = f"test-own-dept-{uuid.uuid4()}"
+        request_approval(
+            task_id=task_id,
+            document_content={"title": "Pump Seal Replacement SOP", "sections": []},
+            risk_assessment={"risk": "high", "department": "maintenance"},
+            department="maintenance",
+        )
+
+        mock_dept_admin = MagicMock()
+        mock_dept_admin.id = str(uuid.uuid4())
+        mock_dept_admin.role = "admin"
+        mock_dept_admin.department = "maintenance"
+        mock_dept_admin.email = "admin.maint@kavach.local"
+
+        res = resolve_approval(task_id=task_id, decision="approve", approver_user=mock_dept_admin)
+        assert res["status"] == "approved"
+
+    def test_superadmin_role_dependency_guards(self):
+        """Endpoints guarded by require_role('superadmin') reject department admins with 403."""
+        from backend.auth.routes import require_role
+        from fastapi import HTTPException
+
+        dep = require_role("superadmin")
+
+        mock_admin = MagicMock()
+        mock_admin.role = "admin"
+
+        with pytest.raises(HTTPException) as exc_info:
+            dep(current_user=mock_admin)
+        assert exc_info.value.status_code == 403
+
+        mock_sa = MagicMock()
+        mock_sa.role = "superadmin"
+        assert dep(current_user=mock_sa) == mock_sa
+
+    def test_auditor_vault_mutation_blocked(self):
+        """Auditor persona is strictly read-only and cannot mutate vault documents."""
+        from backend.main import knowledge_delete, knowledge_upload
+        from fastapi import HTTPException
+
+        mock_auditor = MagicMock()
+        mock_auditor.role = "auditor"
+        mock_auditor.department = "maintenance"
+
+        with pytest.raises(HTTPException) as exc_info:
+            knowledge_upload(file=MagicMock(), current_user=mock_auditor)
+        assert exc_info.value.status_code == 403
+        assert "read-only" in exc_info.value.detail.lower()
+
+        with pytest.raises(HTTPException) as exc_info:
+            knowledge_delete(filename="confidential.pdf", current_user=mock_auditor)
+        assert exc_info.value.status_code == 403
+        assert "read-only" in exc_info.value.detail.lower()
+
+    def test_audit_log_scoping_dept_vs_central(self):
+        """Department Auditor/Admin cannot inspect audit logs of other departments; Central Auditor & Superadmin can."""
+        from backend.main import audit
+        from fastapi import HTTPException
+
+        target_user_id = str(uuid.uuid4())
+        target_user = MagicMock()
+        target_user.id = uuid.UUID(target_user_id)
+        target_user.department = "process"
+
+        mock_db = MagicMock()
+        mock_db.query.return_value.filter.return_value.first.return_value = target_user
+
+        # 1. Department Auditor from 'maintenance' tries to inspect 'process' user log -> 403 Forbidden
+        mock_dept_auditor = MagicMock()
+        mock_dept_auditor.id = uuid.uuid4()
+        mock_dept_auditor.role = "auditor"
+        mock_dept_auditor.department = "maintenance"
+        mock_dept_auditor.name = "Maintenance Auditor"
+
+        with pytest.raises(HTTPException) as exc_info:
+            audit(task_id=None, user_id=target_user_id, current_user=mock_dept_auditor, db=mock_db)
+        assert exc_info.value.status_code == 403
+        assert "within your department" in exc_info.value.detail.lower()
+
+        # 2. Central Auditor ('general') can inspect any user log -> Allowed
+        mock_central_auditor = MagicMock()
+        mock_central_auditor.id = uuid.uuid4()
+        mock_central_auditor.role = "auditor"
+        mock_central_auditor.department = "general"
+        mock_central_auditor.name = "Central Auditor"
+
+        with patch("backend.main.read_events", return_value=[]), patch("backend.main.log_event"):
+            res = audit(task_id=None, user_id=target_user_id, current_user=mock_central_auditor, db=mock_db)
+            assert "events" in res
+
+        # 3. Superadmin can inspect any user log -> Allowed
+        mock_sa = MagicMock()
+        mock_sa.id = uuid.uuid4()
+        mock_sa.role = "superadmin"
+        mock_sa.department = "general"
+        mock_sa.name = "Root Superadmin"
+
+        with patch("backend.main.read_events", return_value=[]), patch("backend.main.log_event"):
+            res = audit(task_id=None, user_id=target_user_id, current_user=mock_sa, db=mock_db)
+            assert "events" in res
 
 
 if __name__ == "__main__":

@@ -101,6 +101,8 @@ export default function App() {
     setActiveChatId(null);
   };
 
+  const [chatSelectTrigger, setChatSelectTrigger] = useState(0);
+
   const handleNewChat = () => {
     setActiveChatId(null);
     setActiveScreen('task');
@@ -109,6 +111,7 @@ export default function App() {
   const handleSelectChat = (chatId) => {
     setActiveChatId(chatId);
     setActiveScreen('task');
+    setChatSelectTrigger((prev) => prev + 1);
   };
 
 
@@ -142,6 +145,7 @@ export default function App() {
               user={user}
               activeChatId={activeChatId}
               setActiveChatId={setActiveChatId}
+              chatSelectTrigger={chatSelectTrigger}
               onShowAuth={() => setShowAuthModal(true)}
               onChatsUpdated={loadChats}
             />
@@ -159,21 +163,18 @@ export default function App() {
             />
           )}
           {activeScreen === 'approvals' && (
-            (user?.role === 'approver' || user?.role === 'admin') ? (
+            (user?.role === 'approver' || user?.role === 'admin' || user?.role === 'superadmin') ? (
               <ApprovalsScreen
                 user={user}
                 onShowAuth={() => setShowAuthModal(true)}
-                onSelectChat={(chatId) => {
-                  setActiveChatId(chatId);
-                  setActiveScreen('task');
-                }}
+                onSelectChat={handleSelectChat}
               />
             ) : (
               <section className="screen">
                 <div className="screen-head">
                   <h2 className="screen-title">Access Restricted</h2>
                   <p className="screen-sub">
-                    Supervisory approval center is restricted to department approvers and administrators.
+                    Supervisory approval center is restricted to department approvers, administrators, and superadmin.
                     Your current role: <strong>{user?.role || 'engineer'}</strong>
                   </p>
                 </div>
@@ -181,14 +182,14 @@ export default function App() {
             )
           )}
           {activeScreen === 'models' && (
-            user?.role === 'admin' ? (
+            user?.role === 'superadmin' ? (
               <ModelSettingsScreen />
             ) : (
               <section className="screen">
                 <div className="screen-head">
                   <h2 className="screen-title">Access Restricted</h2>
                   <p className="screen-sub">
-                    Model management is restricted to administrators.
+                    Model settings and neural runtime management is restricted to the Sovereign Root Superadmin.
                     Your current role: <strong>{user?.role || 'engineer'}</strong>
                   </p>
                 </div>
@@ -196,14 +197,14 @@ export default function App() {
             )
           )}
           {activeScreen === 'users' && (
-            user?.role === 'admin' ? (
+            (user?.role === 'admin' || user?.role === 'superadmin') ? (
               <UserManagementScreen user={user} />
             ) : (
               <section className="screen">
                 <div className="screen-head">
                   <h2 className="screen-title">Access Restricted</h2>
                   <p className="screen-sub">
-                    User management is restricted to administrators.
+                    User management is restricted to administrators and superadmin.
                     Your current role: <strong>{user?.role || 'engineer'}</strong>
                   </p>
                 </div>

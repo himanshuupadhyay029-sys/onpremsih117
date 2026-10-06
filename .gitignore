@@ -67,3 +67,6 @@ kavach/APPROVAL_ROUTING_AND_AUDIT_LOG_GUIDE.md
 Thumbs.db
 *.tmp
 
+# Skills
+platform-frontend.skill
+*.skill

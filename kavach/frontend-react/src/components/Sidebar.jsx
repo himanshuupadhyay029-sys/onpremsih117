@@ -17,7 +17,7 @@ export default function Sidebar({
   const [pendingApprovalsCount, setPendingApprovalsCount] = useState(0);
 
   useEffect(() => {
-    if (!user || (user.role !== 'approver' && user.role !== 'admin')) {
+    if (!user || (user.role !== 'approver' && user.role !== 'admin' && user.role !== 'superadmin')) {
       setPendingApprovalsCount(0);
       return;
     }
@@ -111,8 +111,8 @@ export default function Sidebar({
           <span>Audit Log</span>
         </button>
 
-        {/* Approvals Dashboard — approver & admin only */}
-        {user && (user.role === 'approver' || user.role === 'admin') && (
+        {/* Approvals Dashboard — approver, admin & superadmin */}
+        {user && (user.role === 'approver' || user.role === 'admin' || user.role === 'superadmin') && (
           <button
             className={`nav-item ${activeScreen === 'approvals' ? 'is-active' : ''}`}
             onClick={() => onSelectScreen('approvals')}
@@ -128,8 +128,8 @@ export default function Sidebar({
           </button>
         )}
 
-        {/* Model Settings — admin only */}
-        {(!user || user.role === 'admin') && (
+        {/* Model Settings — superadmin only */}
+        {user && user.role === 'superadmin' && (
           <button
             className={`nav-item ${activeScreen === 'models' ? 'is-active' : ''}`}
             onClick={() => onSelectScreen('models')}
@@ -143,8 +143,8 @@ export default function Sidebar({
           </button>
         )}
 
-        {/* User Management — admin only */}
-        {user && user.role === 'admin' && (
+        {/* User Management — admin & superadmin */}
+        {user && (user.role === 'admin' || user.role === 'superadmin') && (
           <button
             className={`nav-item ${activeScreen === 'users' ? 'is-active' : ''}`}
             onClick={() => onSelectScreen('users')}
@@ -195,13 +195,13 @@ export default function Sidebar({
               {user.role && (
                 <div style={{
                   fontSize: '10px',
-                  color: user.role === 'admin' ? '#f59e0b' : user.role === 'approver' ? '#10b981' : '#818cf8',
+                  color: user.role === 'superadmin' ? '#ef4444' : user.role === 'admin' ? '#f59e0b' : user.role === 'approver' ? '#10b981' : user.role === 'auditor' ? '#06b6d4' : '#818cf8',
                   fontWeight: '600',
                   textTransform: 'uppercase',
                   letterSpacing: '0.05em',
                   marginTop: '2px',
                 }}>
-                  {user.role} · {user.department || 'general'}
+                  {user.role === 'superadmin' ? 'ROOT SUPERADMIN' : `${user.role} · ${user.department || 'general'}`}
                 </div>
               )}
             </div>

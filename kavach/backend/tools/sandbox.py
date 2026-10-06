@@ -342,7 +342,10 @@ def run_code(
         )
 
         try:
-            stdout, stderr = proc.communicate(input=user_stdin, timeout=timeout_seconds)
+            effective_input = user_stdin
+            if effective_input is not None and not effective_input.endswith("\n"):
+                effective_input += "\n"
+            stdout, stderr = proc.communicate(input=effective_input, timeout=timeout_seconds)
             exit_code = proc.returncode
         except subprocess.TimeoutExpired:
             _log_terminal(f"Container '{container_name}' exceeded {timeout_seconds}s timeout! Killing...")

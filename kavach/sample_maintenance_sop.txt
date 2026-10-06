@@ -1,0 +1,8 @@
+MRPL Plant Maintenance Standard Operating Procedure (SOP-MNT-2026-088)
+Section 1: Centrifugal Pump Overhaul and Vibration Diagnostics
+1.1 Periodic vibration analysis must be conducted on all high-pressure boiler feed pumps every 72 operational hours.
+1.2 If peak velocity exceeds 4.5 mm/s RMS, schedule immediate bearing inspection and lubrication replenishment.
+1.3 In the event of cavitation noise, inspect the suction strainer for particulate obstruction and verify NPSH margin.
+Section 2: Emergency Valve Actuator Replacement
+2.1 Isolate line pressure using upstream manual gate valves prior to dismounting pneumatic actuators.
+2.2 Tag and lock out electric control lines per ISO 45001 / HSE Level 4 protocol.

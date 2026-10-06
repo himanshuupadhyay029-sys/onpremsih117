@@ -86,6 +86,7 @@ export default function NewTaskScreen({
   user,
   activeChatId,
   setActiveChatId,
+  chatSelectTrigger = 0,
   onShowAuth,
   onChatsUpdated,
 }) {
@@ -115,6 +116,7 @@ export default function NewTaskScreen({
   const startTimeRef = useRef(0);
 
   const lastLoadedChatIdRef = useRef(undefined);
+  const prevTriggerRef = useRef(chatSelectTrigger);
 
   // Fetch Knowledge Vault document list for @ mention autocomplete
   const fetchVaultDocs = useCallback(async () => {
@@ -205,25 +207,39 @@ export default function NewTaskScreen({
     }
   };
 
-  // Load chat messages when activeChatId changes
+  // Load chat messages when activeChatId changes or user explicitly clicks a chat
   useEffect(() => {
-    // If activeChatId matches what is already loaded/in-memory, do nothing
-    if (activeChatId === lastLoadedChatIdRef.current) {
+    const isExplicitUserClick = chatSelectTrigger !== prevTriggerRef.current;
+    prevTriggerRef.current = chatSelectTrigger;
+
+    if (!activeChatId) {
+      lastLoadedChatIdRef.current = null;
+      setMessages([]);
+      setTaskInput('');
+      setAttachedFiles([]);
+      setTaggedVaultFiles([]);
+      setApprovalOutcome({});
+      return;
+    }
+
+    // If user is not yet logged in / authenticated, wait until user is known
+    if (!user) {
+      return;
+    }
+
+    // If activeChatId matches what is already loaded, has messages, and is NOT an explicit user click, skip
+    if (activeChatId === lastLoadedChatIdRef.current && messages.length > 0 && !isExplicitUserClick) {
       return;
     }
 
     lastLoadedChatIdRef.current = activeChatId;
 
-    // Reset turns and input state on session change
-    setMessages([]);
+    // Reset input state on session load/switch
     setTaskInput('');
     setAttachedFiles([]);
     setTaggedVaultFiles([]);
     setApprovalOutcome({});
 
-    if (!activeChatId) {
-      return;
-    }
     let cancelled = false;
     (async () => {
       try {
@@ -241,7 +257,7 @@ export default function NewTaskScreen({
     return () => {
       cancelled = true;
     };
-  }, [activeChatId]);
+  }, [activeChatId, user, chatSelectTrigger]);
 
   // Auto-scroll to bottom of thread
   useEffect(() => {
@@ -676,13 +692,13 @@ export default function NewTaskScreen({
       );
     }, 1000);
 
-    let streamUrl = `/run/stream?task=${encodeURIComponent(fullTask)}&task_id=${encodeURIComponent(taskId)}${activeChatId ? `&chat_id=${encodeURIComponent(activeChatId)}` : ''}${attachmentType ? `&attachment_type=${encodeURIComponent(attachmentType)}` : ''}`;
+    let streamUrl = `/run/stream?task=${encodeURIComponent(fullTask)}&task_id=${encodeURIComponent(taskId)}${activeChatId ? `&chat_id=${encodeURIComponent(activeChatId)}` : ''}${attachmentType ? `&attachment_type=${encodeURIComponent(attachmentType)}` : ''}${user?.department ? `&department=${encodeURIComponent(user.department)}` : ''}${user?.id ? `&user_id=${encodeURIComponent(user.id)}` : ''}`;
     if (taggedVaultFiles.length > 0) {
       taggedVaultFiles.forEach((vf) => {
         streamUrl += `&vault_files=${encodeURIComponent(vf)}`;
       });
     }
-    const eventSource = new EventSource(streamUrl);
+    const eventSource = new EventSource(streamUrl, { withCredentials: true });
 
     eventSource.addEventListener('plan', (e) => {
       try {
