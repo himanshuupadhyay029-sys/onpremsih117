@@ -70,34 +70,63 @@ CLOUD_DEPLOYMENT = os.environ.get("CLOUD_DEPLOYMENT", "false").lower() == "true"
 ENABLE_DOCKER_SANDBOX = os.environ.get("ENABLE_DOCKER_SANDBOX", "false").lower() == "true"
 
 # ──────────────────────────────────────────────────────────────────────────
-# Hugging Face token pools — 3 tokens per role, for rotation on 429/503
-# Pattern: HF_{ROLE}_API_KEY_{SLOT}  where SLOT = PRIMARY | FALLBACK_1 | FALLBACK_2
+# Hugging Face token pools — robust auto-discovery for all token naming formats
 # ──────────────────────────────────────────────────────────────────────────
 def _load_hf_keys(role: str) -> list[str]:
-    """Returns non-empty tokens for this role in [primary, fb1, fb2] order."""
-    return [
-        v for s in ["PRIMARY", "FALLBACK_1", "FALLBACK_2"]
-        if (v := os.environ.get(f"HF_{role.upper()}_API_KEY_{s}", "").strip())
-    ]
+    """Returns deduplicated non-empty tokens for this role from any standard or custom env var."""
+    keys: list[str] = []
+    role_u = role.upper()
+
+    # 1. Role-specific slotted keys (e.g. HF_REASONING_API_KEY_PRIMARY, FALLBACK_1..10)
+    for s in ["PRIMARY", "FALLBACK_1", "FALLBACK_2", "FALLBACK_3", "FALLBACK_4", "FALLBACK_5", "1", "2", "3", "4", "5"]:
+        for prefix in [f"HF_{role_u}_API_KEY", f"HF_{role_u}_KEY", f"HF_{role_u}_TOKEN"]:
+            if (v := os.environ.get(f"{prefix}_{s}", "").strip()) and v not in keys:
+                keys.append(v)
+            if (v := os.environ.get(f"{prefix}{s}", "").strip()) and v not in keys:
+                keys.append(v)
+
+    # 2. Role-specific direct key
+    for k_name in [f"HF_{role_u}_API_KEY", f"HF_{role_u}_KEY", f"HF_{role_u}_TOKEN"]:
+        if (v := os.environ.get(k_name, "").strip()) and v not in keys:
+            keys.append(v)
+
+    # 3. Generic numbered tokens (HF_TOKEN_1 .. HF_TOKEN_25, HF_API_KEY_1 .. HF_API_KEY_25)
+    for i in range(1, 26):
+        for pattern in [f"HF_TOKEN_{i}", f"HF_API_KEY_{i}", f"HF_KEY_{i}", f"HUGGINGFACE_TOKEN_{i}", f"HF_TOKEN{i}"]:
+            if (v := os.environ.get(pattern, "").strip()) and v not in keys:
+                keys.append(v)
+
+    # 4. Generic single tokens
+    for k_name in ["HF_TOKEN", "HUGGINGFACE_TOKEN", "HF_API_KEY", "HUGGING_FACE_HUB_TOKEN", "HF_AUTH_TOKEN", "HF_API_TOKEN"]:
+        if (v := os.environ.get(k_name, "").strip()) and v not in keys:
+            keys.append(v)
+
+    # 5. Delimited token lists
+    for k_name in ["HF_TOKENS", "HF_API_KEYS", "HUGGINGFACE_TOKENS"]:
+        if raw := os.environ.get(k_name, "").strip():
+            for item in raw.replace(";", ",").replace("\n", ",").split(","):
+                if (clean := item.strip()) and clean not in keys:
+                    keys.append(clean)
+
+    return keys
 
 HF_KEYS: dict[str, list[str]] = {
     "reasoning": _load_hf_keys("REASONING"),
     "code":      _load_hf_keys("CODE"),
     "vision":    _load_hf_keys("VISION"),
     "embedding": _load_hf_keys("EMBEDDING"),
-    "rerank":    _load_hf_keys("RERANK"),   # dedicated pool — 3 separate accounts
+    "rerank":    _load_hf_keys("RERANK"),
 }
 
 # ──────────────────────────────────────────────────────────────────────────
-# Hugging Face model IDs (HF Hub format — NOT Ollama tags)
-# Override via env var without code changes
+# Hugging Face model IDs (HF Hub format — validated for HF Serverless Router)
 # ──────────────────────────────────────────────────────────────────────────
 HF_MODELS: dict[str, str] = {
-    "reasoning": os.environ.get("HF_MODEL_REASONING", "Qwen/Qwen2.5-7B-Instruct"),
+    "reasoning": os.environ.get("HF_MODEL_REASONING", "meta-llama/Llama-3.2-3B-Instruct"),
     "code":      os.environ.get("HF_MODEL_CODE",      "ibm-granite/granite-3.3-8b-instruct"),
     "vision":    os.environ.get("HF_MODEL_VISION",    "Qwen/Qwen2-VL-7B-Instruct"),
     "embedding": os.environ.get("HF_MODEL_EMBEDDING", "nomic-ai/nomic-embed-text-v1.5"),
-    "rerank":    os.environ.get("HF_MODEL_RERANK",    "Qwen/Qwen2.5-7B-Instruct"),
+    "rerank":    os.environ.get("HF_MODEL_RERANK",    "meta-llama/Llama-3.2-3B-Instruct"),
 }
 
 

@@ -44,6 +44,18 @@ def _role_from_model(model_id: str) -> str:
     return "reasoning"  # safe default
 
 
+def _format_messages_to_prompt(messages: list) -> str:
+    """Fallback converter from message list to text generation prompt."""
+    parts = []
+    for m in messages:
+        if isinstance(m, dict):
+            role = m.get("role", "user").capitalize()
+            content = m.get("content", "")
+            parts.append(f"{role}: {content}")
+    parts.append("Assistant:")
+    return "\n\n".join(parts)
+
+
 def _call_with_rotation(model_id: str, payload: dict) -> Union[dict, list]:
     """POST to HF Inference API with token and model rotation."""
     role = _role_from_model(model_id)
@@ -59,13 +71,23 @@ def _call_with_rotation(model_id: str, payload: dict) -> Union[dict, list]:
     if not keys:
         raise HFClientError(
             f"No HF API keys configured for role '{role}'. "
-            f"Set HF_{role.upper()}_API_KEY_PRIMARY in environment variables."
+            f"Set HF_{role.upper()}_API_KEY_PRIMARY or HF_TOKEN in environment variables."
         )
 
     is_chat = "messages" in payload
     candidate_models = [model_id]
     if is_chat:
-        for alt in ["Qwen/Qwen2.5-7B-Instruct", "meta-llama/Llama-3.1-8B-Instruct", "mistralai/Mistral-7B-Instruct-v0.3"]:
+        for alt in [
+            "meta-llama/Llama-3.2-3B-Instruct",
+            "Qwen/Qwen2.5-72B-Instruct",
+            "Qwen/Qwen2.5-7B-Instruct",
+            "meta-llama/Llama-3.3-70B-Instruct",
+            "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B",
+            "google/gemma-2-2b-it",
+            "microsoft/Phi-3.5-mini-instruct",
+            "mistralai/Mistral-7B-Instruct-v0.2",
+            "HuggingFaceH4/zephyr-7b-beta",
+        ]:
             if alt not in candidate_models:
                 candidate_models.append(alt)
 
@@ -84,7 +106,7 @@ def _call_with_rotation(model_id: str, payload: dict) -> Union[dict, list]:
             call_payload = payload
 
         for i, key in enumerate(keys):
-            slot = "PRIMARY" if i == 0 else f"FALLBACK_{i}"
+            slot = "PRIMARY" if i == 0 else f"KEY_{i+1}"
             try:
                 logger.debug(f"[HF] {role}/{slot} -> {url} (model={current_model})")
                 resp = httpx.post(
@@ -119,6 +141,29 @@ def _call_with_rotation(model_id: str, payload: dict) -> Union[dict, list]:
                     continue
 
                 elif resp.status_code in (400, 404):
+                    # If /v1/chat/completions failed, try standard text generation fallback for this model
+                    if is_chat and "messages" in payload:
+                        raw_url = f"{HF_API_BASE}/{current_model}"
+                        raw_payload = {
+                            "inputs": _format_messages_to_prompt(payload["messages"]),
+                            "parameters": {
+                                "max_new_tokens": call_payload.get("max_tokens", 1024),
+                                "temperature": 0.7,
+                                "return_full_text": False,
+                            }
+                        }
+                        try:
+                            raw_resp = httpx.post(
+                                raw_url,
+                                json=raw_payload,
+                                headers={"Authorization": f"Bearer {key}"},
+                                timeout=_DEFAULT_TIMEOUT,
+                            )
+                            if raw_resp.status_code == 200:
+                                return raw_resp.json()
+                        except Exception:
+                            pass
+
                     logger.warning(f"[HF] Model '{current_model}' returned {resp.status_code}: {resp.text[:160]}")
                     last_error = f"Model '{current_model}' returned {resp.status_code}: {resp.text[:160]}"
                     # Try next model candidate
