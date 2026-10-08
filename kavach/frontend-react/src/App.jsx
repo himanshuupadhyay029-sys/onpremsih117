@@ -20,10 +20,8 @@ export default function App() {
     return localStorage.getItem('kavach_sidebar_collapsed') === '1';
   });
 
-  // SIH 117 Evaluator Architecture Notice State
-  const [showBriefing, setShowBriefing] = useState(() => {
-    return !sessionStorage.getItem('kavach_briefing_seen');
-  });
+  // SIH 117 Evaluator Architecture Notice State - Always display on load
+  const [showBriefing, setShowBriefing] = useState(true);
 
   // Auth state
   const [user, setUser] = useState(null);

@@ -7583,122 +7583,132 @@ select {
 }
 
 /* ══════════════════════════════════════════════
-   SLIDE BUTTON  —  Premium Click-to-Sweep
+   SLIDE TO UNLOCK  —  Interactive Draggable Slider
    ══════════════════════════════════════════════ */
 
-/* Outer pill button */
+/* Outer pill track */
 .briefing-slide-track {
   position: relative;
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: 12px;
-  height: 50px;
-  min-width: 280px;
-  padding: 0 20px 0 6px;
+  height: 52px;
+  width: 100%;
+  max-width: 480px;
+  padding: 0 4px;
   border-radius: 100px;
-  background: #0a0f1a;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  cursor: pointer;
+  background: #0f172a;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  cursor: grab;
   overflow: hidden;
   user-select: none;
-  transition: border-color 0.22s ease, box-shadow 0.22s ease;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.35);
+  touch-action: none;
+  box-shadow: 0 2px 14px rgba(0, 0, 0, 0.4), inset 0 1px 2px rgba(0, 0, 0, 0.5);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .briefing-slide-track:hover {
-  border-color: rgba(255, 255, 255, 0.2);
+  border-color: rgba(255, 255, 255, 0.22);
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.45);
 }
 
-/* Green sweep fill — activated by .slide-active */
-.bst-fill {
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(90deg, #14532d 0%, #16a34a 60%, #4ade80 100%);
-  width: 0%;
-  border-radius: inherit;
-  pointer-events: none;
-}
-
-.briefing-slide-track.slide-active .bst-fill {
-  animation: bstSweep 0.48s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+.briefing-slide-track.is-dragging {
+  cursor: grabbing;
+  border-color: rgba(16, 185, 129, 0.5);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5), 0 0 16px rgba(16, 185, 129, 0.15);
 }
 
 .briefing-slide-track.slide-unlocked {
-  border-color: #16a34a;
-  box-shadow: 0 0 0 2px rgba(22, 163, 74, 0.25);
+  cursor: default;
+  border-color: #10b981;
+  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.3), 0 4px 24px rgba(16, 185, 129, 0.35);
 }
 
-.briefing-slide-track.slide-unlocked .bst-fill {
-  width: 100%;
+/* Green dynamic drag fill */
+.bst-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  background: linear-gradient(90deg, #064e3b 0%, #059669 60%, #10b981 100%);
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 1;
 }
 
 /* White circular thumb */
 .bst-thumb {
   position: relative;
-  z-index: 2;
+  z-index: 3;
   flex-shrink: 0;
-  width: 38px;
-  height: 38px;
+  width: 44px;
+  height: 44px;
   border-radius: 50%;
   background: #ffffff;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-  transition: background 0.2s ease, transform 0.2s ease;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  touch-action: none;
+  user-select: none;
 }
 
-.briefing-slide-track.slide-active .bst-thumb,
+.briefing-slide-track.is-dragging .bst-thumb {
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+}
+
 .briefing-slide-track.slide-unlocked .bst-thumb {
   background: #ffffff;
-  transform: scale(1.05);
+  box-shadow: 0 0 12px rgba(16, 185, 129, 0.6);
 }
 
 .bst-thumb-icon {
-  width: 16px;
-  height: 16px;
-  stroke: #0a0f1a;
-  stroke-width: 2;
+  width: 18px;
+  height: 18px;
+  stroke: #0f172a;
+  stroke-width: 2.2;
   fill: none;
   stroke-linecap: round;
   stroke-linejoin: round;
+  pointer-events: none;
+}
+
+.bst-thumb-icon-success {
+  stroke: #059669;
+  stroke-width: 3;
 }
 
 /* Label text */
 .bst-label {
-  position: relative;
+  position: absolute;
+  left: 0;
+  right: 0;
+  text-align: center;
   z-index: 2;
-  flex: 1;
   font-size: 13.5px;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.82);
-  letter-spacing: 0.01em;
-  transition: color 0.2s ease;
+  color: rgba(255, 255, 255, 0.88);
+  letter-spacing: 0.02em;
+  pointer-events: none;
+  user-select: none;
+  padding: 0 54px;
   white-space: nowrap;
-}
-
-.briefing-slide-track:hover .bst-label {
-  color: #ffffff;
-}
-
-.briefing-slide-track.slide-active .bst-label,
-.briefing-slide-track.slide-unlocked .bst-label {
-  color: #ffffff;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  transition: opacity 0.15s ease;
 }
 
 /* Idle drifting arrow */
 .bst-arrow {
-  position: relative;
+  position: absolute;
+  right: 18px;
   z-index: 2;
   font-size: 16px;
   color: rgba(255, 255, 255, 0.45);
-  animation: bstArrowDrift 1.8s ease-in-out infinite;
-  flex-shrink: 0;
+  pointer-events: none;
+  animation: bstArrowDrift 1.6s ease-in-out infinite;
 }
 
 @keyframes bstArrowDrift {
-
   0%,
   100% {
     transform: translateX(0);
@@ -7711,29 +7721,19 @@ select {
   }
 }
 
-@keyframes bstSweep {
-  from {
-    width: 0%;
-    opacity: 0.7;
-  }
-
-  to {
-    width: 100%;
-    opacity: 1;
-  }
-}
-
-/* ── Footer & Checkbox ── */
+/* ── Footer ── */
 .briefing-footer {
-  padding: 16px 28px 24px;
+  padding: 18px 28px 24px;
   border-top: 1px solid var(--hairline);
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
+  justify-content: center;
   background: var(--bg-card);
   border-radius: 0 0 var(--radius-lg, 16px) var(--radius-lg, 16px);
+}
+
+.briefing-footer-centered {
+  justify-content: center;
 }
 
 .briefing-checkbox-label {

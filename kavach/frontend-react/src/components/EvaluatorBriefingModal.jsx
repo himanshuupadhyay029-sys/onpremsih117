@@ -1,65 +1,103 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 
-export default function EvaluatorBriefingModal({ isOpen, onClose, isFirstVisit = false }) {
-  const [dontShowAgain, setDontShowAgain] = useState(true);
-  const [isActive, setIsActive]           = useState(false); // triggers CSS sweep
-  const [isUnlocked, setIsUnlocked]       = useState(false); // success state
+export default function EvaluatorBriefingModal({ isOpen, onClose }) {
+  const [dragOffset, setDragOffset] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
+  const [isUnlocked, setIsUnlocked] = useState(false);
 
+  const trackRef = useRef(null);
+  const startXRef = useRef(0);
+  const maxSlideRef = useRef(0);
+
+  // Reset state when modal opens
   useEffect(() => {
-    if (!isOpen) {
-      setIsActive(false);
+    if (isOpen) {
+      setDragOffset(0);
+      setIsDragging(false);
       setIsUnlocked(false);
     }
   }, [isOpen]);
 
+  // Recalculate max draggable distance
+  const updateMaxSlide = useCallback(() => {
+    if (trackRef.current) {
+      const trackWidth = trackRef.current.clientWidth;
+      const thumbWidth = 44; // Thumb width in px
+      const padding = 8; // Left/right padding
+      maxSlideRef.current = Math.max(0, trackWidth - thumbWidth - padding);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isOpen) {
+      updateMaxSlide();
+      window.addEventListener('resize', updateMaxSlide);
+      return () => window.removeEventListener('resize', updateMaxSlide);
+    }
+  }, [isOpen, updateMaxSlide]);
+
   if (!isOpen) return null;
 
-  const handleProceed = () => {
-    if (dontShowAgain) {
-      sessionStorage.setItem('kavach_briefing_seen', '1');
+  const handlePointerDown = (e) => {
+    if (isUnlocked) return;
+    updateMaxSlide();
+    setIsDragging(true);
+    startXRef.current = e.clientX - dragOffset;
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // ignore
     }
-    onClose();
   };
 
-  const handleOverlayClick = (e) => {
-    if (e.target === e.currentTarget && !isFirstVisit) {
-      handleProceed();
+  const handlePointerMove = (e) => {
+    if (!isDragging || isUnlocked) return;
+    const currentX = e.clientX;
+    const rawOffset = currentX - startXRef.current;
+    const max = maxSlideRef.current || 200;
+    const clamped = Math.max(0, Math.min(rawOffset, max));
+    setDragOffset(clamped);
+  };
+
+  const handlePointerUp = (e) => {
+    if (!isDragging || isUnlocked) return;
+    setIsDragging(false);
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      // ignore
+    }
+
+    const max = maxSlideRef.current || 200;
+    const progress = max > 0 ? dragOffset / max : 0;
+
+    // Threshold: 82% of total track distance
+    if (progress >= 0.82) {
+      setIsUnlocked(true);
+      setDragOffset(max);
+      setTimeout(() => {
+        onClose();
+      }, 360);
+    } else {
+      // Snap back smoothly to start
+      setDragOffset(0);
     }
   };
 
-  /* Triggered on click — CSS animation runs, onAnimationEnd calls proceed */
-  const handleSlideClick = () => {
-    if (isActive || isUnlocked) return;
-    setIsActive(true);
-  };
-
-  const handleFillAnimEnd = () => {
-    setIsUnlocked(true);
-    setTimeout(handleProceed, 320);
-  };
+  const max = maxSlideRef.current || 200;
+  const progress = max > 0 ? dragOffset / max : 0;
+  const fillWidth = dragOffset > 0 ? `calc(${dragOffset}px + 44px)` : '0%';
+  const textOpacity = Math.max(0, 1 - progress * 1.5);
 
   return (
     <div
       className="evaluator-briefing-overlay"
-      onClick={handleOverlayClick}
       id="evaluator-briefing-overlay"
       role="dialog"
       aria-modal="true"
       aria-labelledby="briefing-title"
     >
       <div className="evaluator-briefing-modal" id="evaluator-briefing-modal">
-
-        {/* Close button */}
-        <button
-          className="briefing-close-btn"
-          onClick={handleProceed}
-          title="Close briefing"
-          aria-label="Close architecture briefing"
-        >
-          <svg className="icon" viewBox="0 0 24 24">
-            <path d="M18 6L6 18M6 6l12 12" />
-          </svg>
-        </button>
 
         {/* Header */}
         <div className="briefing-header">
@@ -160,13 +198,13 @@ export default function EvaluatorBriefingModal({ isOpen, onClose, isFirstVisit =
 
             <div className="bms-status-chips">
               <span className="bms-chip bms-chip--safe">
-                <svg viewBox="0 0 24 24" className="icon" style={{width:'13px',height:'13px'}}>
+                <svg viewBox="0 0 24 24" className="icon" style={{ width: '13px', height: '13px' }}>
                   <polyline points="20 6 9 17 4 12" />
                 </svg>
                 USA / EU Origin Only
               </span>
               <span className="bms-chip bms-chip--danger">
-                <svg viewBox="0 0 24 24" className="icon" style={{width:'13px',height:'13px'}}>
+                <svg viewBox="0 0 24 24" className="icon" style={{ width: '13px', height: '13px' }}>
                   <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
                 </svg>
                 No Chinese Models in Production
@@ -175,34 +213,42 @@ export default function EvaluatorBriefingModal({ isOpen, onClose, isFirstVisit =
           </div>
         </div>
 
-        {/* Footer */}
-        <div className="briefing-footer">
-          <label className="briefing-checkbox-label">
-            <input
-              type="checkbox"
-              checked={dontShowAgain}
-              onChange={(e) => setDontShowAgain(e.target.checked)}
-            />
-            <span>Don&rsquo;t show this notice automatically again this session</span>
-          </label>
-
-          {/* ── Click-to-Sweep Slide Button ── */}
-          <button
-            className={`briefing-slide-track${isActive ? ' slide-active' : ''}${isUnlocked ? ' slide-unlocked' : ''}`}
-            onClick={handleSlideClick}
-            aria-label="Click to enter sovereign workspace"
+        {/* Footer with Draggable Slide-to-Unlock Slider */}
+        <div className="briefing-footer briefing-footer-centered">
+          <div
+            ref={trackRef}
+            className={`briefing-slide-track ${isDragging ? 'is-dragging' : ''} ${isUnlocked ? 'slide-unlocked' : ''}`}
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+            onPointerCancel={handlePointerUp}
+            role="slider"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={Math.round(progress * 100)}
+            aria-label="Slide to enter sovereign workspace"
             id="btn-enter-workspace"
           >
-            {/* Green sweep fill — CSS animation on .slide-active */}
-            <span
+            {/* Dynamic Green Sweep Fill tracking slider position */}
+            <div
               className="bst-fill"
-              onAnimationEnd={handleFillAnimEnd}
+              style={{
+                width: fillWidth,
+                transition: isDragging ? 'none' : 'width 0.28s cubic-bezier(0.25, 1, 0.5, 1)',
+              }}
             />
 
-            {/* Left thumb icon */}
-            <span className="bst-thumb" aria-hidden="true">
+            {/* Draggable Thumb */}
+            <div
+              className="bst-thumb"
+              style={{
+                transform: `translateX(${dragOffset}px)`,
+                transition: isDragging ? 'none' : 'transform 0.28s cubic-bezier(0.25, 1, 0.5, 1)',
+              }}
+              aria-hidden="true"
+            >
               {isUnlocked ? (
-                <svg viewBox="0 0 24 24" className="bst-thumb-icon">
+                <svg viewBox="0 0 24 24" className="bst-thumb-icon bst-thumb-icon-success">
                   <polyline points="20 6 9 17 4 12" />
                 </svg>
               ) : (
@@ -211,18 +257,21 @@ export default function EvaluatorBriefingModal({ isOpen, onClose, isFirstVisit =
                   <polyline points="12 5 19 12 12 19" />
                 </svg>
               )}
+            </div>
+
+            {/* Centered Label text */}
+            <span
+              className="bst-label"
+              style={{ opacity: isUnlocked ? 1 : textOpacity }}
+            >
+              {isUnlocked ? 'Verified · Entering Workspace…' : 'Slide to Enter Sovereign Workspace →'}
             </span>
 
-            {/* Label text */}
-            <span className="bst-label">
-              {isUnlocked ? 'Entering…' : 'Enter Sovereign Workspace'}
-            </span>
-
-            {/* Idle drifting arrow — hidden after activation */}
-            {!isActive && !isUnlocked && (
+            {/* Idle subtle guidance indicator */}
+            {!isDragging && !isUnlocked && dragOffset === 0 && (
               <span className="bst-arrow" aria-hidden="true">→</span>
             )}
-          </button>
+          </div>
         </div>
 
       </div>
