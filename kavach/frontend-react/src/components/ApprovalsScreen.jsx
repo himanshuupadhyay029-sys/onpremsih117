@@ -409,28 +409,30 @@ export default function ApprovalsScreen({ user, onShowAuth, onSelectChat }) {
 
         <div className="approvals-filters">
           {isSuperadmin || userDept === 'general' ? (
-            <SovereignSelect
-              style={{ width: '180px' }}
-              value={deptFilter}
-              onChange={(e) => setDeptFilter(e.target.value)}
-              options={DEPT_FILTER_OPTIONS}
-              placeholder="All Departments"
-              ariaLabel="Department Filter"
-            />
+            <div className="approvals-select-wrapper">
+              <SovereignSelect
+                value={deptFilter}
+                onChange={(e) => setDeptFilter(e.target.value)}
+                options={DEPT_FILTER_OPTIONS}
+                placeholder="All Departments"
+                ariaLabel="Department Filter"
+              />
+            </div>
           ) : (
             <div className="approvals-fixed-dept" title="Filtered to your assigned department">
               <span>Dept: <strong>{userDept.toUpperCase()}</strong></span>
             </div>
           )}
 
-          <SovereignSelect
-            style={{ width: '160px' }}
-            value={riskFilter}
-            onChange={(e) => setRiskFilter(e.target.value)}
-            options={RISK_FILTER_OPTIONS}
-            placeholder="All Risk Levels"
-            ariaLabel="Risk Filter"
-          />
+          <div className="approvals-select-wrapper">
+            <SovereignSelect
+              value={riskFilter}
+              onChange={(e) => setRiskFilter(e.target.value)}
+              options={RISK_FILTER_OPTIONS}
+              placeholder="All Risk Levels"
+              ariaLabel="Risk Filter"
+            />
+          </div>
 
           <button
             type="button"

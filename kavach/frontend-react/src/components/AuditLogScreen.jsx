@@ -73,7 +73,7 @@ export default function AuditLogScreen({ user, onShowAuth }) {
   const handleVerifyChain = async () => {
     setVerifyState({ checking: true, result: null });
     try {
-      const res = await fetch('/audit/verify', { credentials: 'include' });
+      const res = await fetch(`${API_BASE}/audit/verify`, { credentials: 'include' });
       const data = await res.json();
       setVerifyState({ checking: false, result: data });
     } catch (err) {
@@ -418,14 +418,15 @@ export default function AuditLogScreen({ user, onShowAuth }) {
             />
           </div>
 
-          <SovereignSelect
-            style={{ width: '200px' }}
-            value={filterType}
-            onChange={(e) => setFilterType(e.target.value)}
-            options={EVENT_TYPE_OPTIONS}
-            placeholder="All Event Types"
-            ariaLabel="Filter by Event Type"
-          />
+          <div className="audit-select-wrapper">
+            <SovereignSelect
+              value={filterType}
+              onChange={(e) => setFilterType(e.target.value)}
+              options={EVENT_TYPE_OPTIONS}
+              placeholder="All Event Types"
+              ariaLabel="Filter by Event Type"
+            />
+          </div>
         </div>
 
         {/* Category Filter Chips per Recipe 7 */}

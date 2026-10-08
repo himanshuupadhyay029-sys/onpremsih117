@@ -278,9 +278,9 @@ export default function UserManagementScreen({ user }) {
 
   return (
     <section className="screen screen-wide">
-      <div className="screen-head user-mgt-head">
+      <div className="screen-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px' }}>
         <div>
-          <div className="user-mgt-title-row">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <h2 className="screen-title" style={{ margin: 0 }}>User & Access Management</h2>
             <span style={{
               fontSize: '11px',
@@ -302,7 +302,7 @@ export default function UserManagementScreen({ user }) {
               : `Departmental scope: managing operators, approvers, and engineers strictly within the ${userDept.toUpperCase()} department.`}
           </p>
         </div>
-        <div className="user-mgt-tabs">
+        <div style={{ display: 'flex', gap: '8px' }}>
           <button
             className={`btn ${activeTab === 'users' ? 'btn-primary' : 'btn-secondary'}`}
             onClick={() => setActiveTab('users')}
@@ -339,16 +339,17 @@ export default function UserManagementScreen({ user }) {
       {/* TAB 1: USERS DIRECTORY */}
       {activeTab === 'users' && (
         <>
-          <div className="filters user-mgt-filters">
+          <div className="filters" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px', gap: '12px' }}>
             <input
-              className="field user-search-input"
+              className="field"
               type="search"
               placeholder="Search user by name, email, role, or department…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
+              style={{ flex: 1, maxWidth: '420px', borderRadius: 'var(--radius-pill)', height: '40px', padding: '0 18px' }}
             />
             <button
-              className="btn btn-primary btn-provision-user"
+              className="btn btn-primary"
               onClick={() => setShowProvisionModal(true)}
               style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
             >
@@ -364,8 +365,8 @@ export default function UserManagementScreen({ user }) {
           ) : filteredUsers.length === 0 ? (
             <div className="empty">No matching users found.</div>
           ) : (
-            <div className="user-mgt-table-card">
-              <table className="user-mgt-table">
+            <div className="um-table-wrap">
+              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
                 <thead>
                   <tr style={{
                     borderBottom: '1px solid #e2e8f0',
@@ -496,7 +497,7 @@ export default function UserManagementScreen({ user }) {
               </span>
             </div>
           )}
-          <div className="depts-roles-grid">
+          <div className="um-depts-roles-grid">
             {/* Departments Column */}
             <div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
