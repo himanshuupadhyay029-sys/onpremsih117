@@ -25,7 +25,7 @@ GENERATE_PROMPTS = {
 Requirements:
 - Return ONLY the raw Python code. No markdown code fences, no explanation, no comments about what you are doing.
 - The script must run standalone with `python script.py` and print its result(s) to stdout.
-- NON-INTERACTIVE EXECUTION: The script runs in a headless sandbox with NO interactive keyboard input (stdin is closed). NEVER use interactive input() or while True input loops. Hardcode all test variables, constants, or function arguments directly in the script.
+- Interactive user input: If the task requests taking input from the user (e.g. "take ... from user", "prompt user", "user input", "read input"), read from standard input using `input()` (e.g. `end = int(input("Enter end value: "))`). Always wrap interactive input in a try-except block to gracefully fall back to a sensible default test value upon EOFError or ValueError (e.g. `try: end = int(input("Enter end value: ")) except (EOFError, ValueError): end = 10`), ensuring the script runs both interactively with user stdin and in automated headless test runs. If no user input is requested, hardcode sample test variables directly.
 - Use only the Python standard library — the execution sandbox has no network access, so third-party packages cannot be installed.
 """,
     "javascript": """Write a complete, self-contained Node.js / JavaScript script that accomplishes the following task:
@@ -35,7 +35,7 @@ Requirements:
 Requirements:
 - Return ONLY the raw JavaScript code. No markdown code fences, no explanation, no comments about what you are doing.
 - The script must run standalone with `node script.js` and print its result(s) to stdout using console.log.
-- NON-INTERACTIVE EXECUTION: Hardcode all test variables and parameters directly in the script. Do not wait for stdin.
+- If interactive user input is requested, read from standard input or process.stdin with a fallback default test value. Otherwise, hardcode test variables directly.
 - Use only built-in Node.js standard modules — no external npm packages can be installed.
 """,
     "c": """Write a complete, self-contained C source file that accomplishes the following task:
@@ -46,7 +46,7 @@ Requirements:
 - Return ONLY the raw C source code. No markdown code fences, no explanation.
 - Include all necessary standard headers (e.g. #include <stdio.h>, #include <stdlib.h>, #include <string.h>, #include <math.h>).
 - Implement a complete int main() entry function that prints its result(s) to stdout via printf and returns 0.
-- NON-INTERACTIVE: Hardcode sample values or arguments.
+- If interactive user input is requested, use scanf with fallback handling. Otherwise, hardcode sample values.
 - Use only the C standard library.
 """,
 }
@@ -65,7 +65,7 @@ Fix the specific problem shown in that error and write a corrected, complete scr
 Requirements:
 - Return ONLY the raw Python code. No markdown code fences, no explanation.
 - The script must run standalone with `python script.py` and print its result(s) to stdout.
-- NON-INTERACTIVE: If the error was an EOFError or timeout, completely eliminate all input() calls and hardcode sample values or function parameters directly so the script executes immediately.
+- If the error was an EOFError or empty input, ensure input() has a try-except fallback to sensible default values (e.g. `try: end = int(input()) except (EOFError, ValueError): end = 10`) so the script runs cleanly while still accepting stdin when provided.
 - Use only the Python standard library — no network access is available to install packages.
 """,
     "javascript": """Write a complete, self-contained Node.js / JavaScript script that accomplishes the following task:
@@ -178,12 +178,17 @@ def write_and_run(
     _log_terminal(f"write_and_run invoked: language='{lang}', has_stdin={bool(user_stdin)}")
 
     code = generate_code(task_description, language=lang, prior_error=prior_error)
+
+    effective_stdin = user_stdin
+    if effective_stdin is None and re.search(r"\binput\s*\(|sys\.stdin|scanf\s*\(|readline\s*\(", code):
+        effective_stdin = "10\n"
+
     sandbox_result = run_code(
         code,
         language=lang,
         timeout_seconds=timeout_seconds,
         task_id=task_id,
-        user_stdin=user_stdin,
+        user_stdin=effective_stdin,
     )
 
     return {

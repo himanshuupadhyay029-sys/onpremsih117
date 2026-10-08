@@ -1,15 +1,77 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { API_BASE } from '../config';
+import SovereignSelect from './SovereignSelect';
+import IngestionMachinery from './IngestionMachinery';
+
+const DEPARTMENT_OPTIONS = [
+  { value: 'general', label: 'General' },
+  { value: 'process', label: 'Process' },
+  { value: 'maintenance', label: 'Maintenance' },
+  { value: 'hse', label: 'HSE' },
+  { value: 'projects', label: 'Projects' },
+  { value: 'finance', label: 'Finance' },
+];
+
+const CLASSIFICATION_OPTIONS = [
+  { value: 'public', label: 'Public' },
+  { value: 'internal', label: 'Internal' },
+  { value: 'restricted', label: 'Restricted' },
+];
 
 export default function KnowledgeVaultScreen({ user, onShowAuth }) {
   const [documents, setDocuments] = useState([]);
   const [totalChunks, setTotalChunks] = useState(0);
   const [loading, setLoading] = useState(true);
   const [uploadStatus, setUploadStatus] = useState('');
+  const [ingestionSession, setIngestionSession] = useState(null); // { file, isProcessing, result, error }
+  const [activeIngestion, setActiveIngestion] = useState(null); // { filename, stage, status: 'processing'|'done'|'error', errorMsg, chunkCount, dept, classification }
   const [docToDelete, setDocToDelete] = useState(null); // { filename, chunk_count }
   const [isDeleting, setIsDeleting] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [uploadDepartment, setUploadDepartment] = useState('general');
+  const [uploadClassification, setUploadClassification] = useState('internal');
   const fileInputRef = useRef(null);
+
+  const isSuperadmin = user?.role === 'superadmin';
+  const userDept = user?.department || 'general';
+  const canSelectRestricted = ['superadmin', 'admin', 'approver'].includes(user?.role);
+
+  // Synchronize department when switching users
+  useEffect(() => {
+    if (!isSuperadmin && userDept) {
+      setUploadDepartment(userDept);
+    }
+  }, [isSuperadmin, userDept]);
+
+  // Ensure regular engineers cannot select restricted
+  useEffect(() => {
+    if (!canSelectRestricted && uploadClassification === 'restricted') {
+      setUploadClassification('internal');
+    }
+  }, [canSelectRestricted, uploadClassification]);
+
+  const availableClassificationOptions = useMemo(() => {
+    if (canSelectRestricted) return CLASSIFICATION_OPTIONS;
+    return CLASSIFICATION_OPTIONS.filter((opt) => opt.value !== 'restricted');
+  }, [canSelectRestricted]);
+
+  // Ingestion machinery animation toggle - defaults to OFF
+  const [enableAnimation, setEnableAnimation] = useState(() => {
+    const saved = localStorage.getItem('kavach_vault_animation');
+    if (saved !== null) return saved === 'true';
+    return (
+      import.meta.env.VITE_ENABLE_INGESTION_ANIMATION === 'true' ||
+      import.meta.env.VITE_ENABLE_INGESTION_ANIMATION === '1'
+    );
+  });
+
+  const handleToggleAnimation = () => {
+    setEnableAnimation((prev) => {
+      const next = !prev;
+      localStorage.setItem('kavach_vault_animation', String(next));
+      return next;
+    });
+  };
 
   const fetchKnowledgeList = async () => {
     if (!user) {
@@ -57,11 +119,38 @@ export default function KnowledgeVaultScreen({ user, onShowAuth }) {
       if (onShowAuth) onShowAuth();
       return;
     }
-    setUploadStatus(`Ingesting ${file.name}…`);
+
+    const effectiveDept = isSuperadmin ? uploadDepartment : userDept;
+    const effectiveClass = canSelectRestricted
+      ? uploadClassification
+      : (uploadClassification === 'restricted' ? 'internal' : uploadClassification);
+
+    setUploadStatus(`Ingesting ${file.name} into on-prem vector vault…`);
+
+    // Always launch prominent real-time Ingestion Line
+    setActiveIngestion({
+      filename: file.name,
+      status: 'processing',
+      stage: 'Extracting text, OCR, chunking & generating on-prem embeddings…',
+      dept: effectiveDept,
+      classification: effectiveClass,
+    });
+
+    // Optionally launch rich multi-stage machinery animation if user/env enabled
+    if (enableAnimation) {
+      setIngestionSession({
+        file,
+        isProcessing: true,
+        result: null,
+        error: null,
+      });
+    }
 
     const formData = new FormData();
     formData.append('file', file);
     formData.append('ingest', 'true');
+    formData.append('department', effectiveDept);
+    formData.append('classification_level', effectiveClass);
 
     try {
       const res = await fetch(`${API_BASE}/knowledge/upload`, {
@@ -91,10 +180,50 @@ export default function KnowledgeVaultScreen({ user, onShowAuth }) {
       setUploadStatus(
         `✓ Ingested ${data.filename || file.name} (${addedChunks} chunk${addedChunks === 1 ? '' : 's'} added)`
       );
+
+      // Update real-time Ingestion Line to success state
+      setActiveIngestion({
+        filename: data.filename || file.name,
+        status: 'done',
+        stage: 'Successfully indexed into local FAISS + BM25 vector stores',
+        chunkCount: addedChunks,
+        dept: effectiveDept,
+        classification: effectiveClass,
+      });
+
+      if (enableAnimation) {
+        setIngestionSession((prev) => ({
+          ...prev,
+          isProcessing: false,
+          result: data,
+          error: null,
+        }));
+      }
       fetchKnowledgeList();
-      setTimeout(() => setUploadStatus(''), 6000);
+
+      // Auto-clear success message after 8 seconds
+      setTimeout(() => {
+        setUploadStatus('');
+        setActiveIngestion((prev) => (prev?.status === 'done' ? null : prev));
+      }, 8000);
     } catch (err) {
       setUploadStatus(`Upload failed: ${err.message}`);
+      setActiveIngestion({
+        filename: file.name,
+        status: 'error',
+        errorMsg: err.message,
+        dept: effectiveDept,
+        classification: effectiveClass,
+      });
+
+      if (enableAnimation) {
+        setIngestionSession((prev) => ({
+          ...prev,
+          isProcessing: false,
+          result: null,
+          error: err.message,
+        }));
+      }
     }
   };
 
@@ -155,10 +284,11 @@ export default function KnowledgeVaultScreen({ user, onShowAuth }) {
           flexDirection: 'column',
           alignItems: 'center',
           justifyContent: 'center',
-          padding: '60px 20px',
-          background: 'rgba(255, 255, 255, 0.02)',
-          border: '1px dashed rgba(255, 255, 255, 0.12)',
-          borderRadius: '12px',
+          padding: '48px 24px',
+          background: 'var(--bg-card)',
+          border: '1px solid var(--border)',
+          borderRadius: 'var(--radius-lg)',
+          boxShadow: 'var(--shadow-card)',
           marginTop: '20px',
           textAlign: 'center',
         }}>
@@ -166,34 +296,27 @@ export default function KnowledgeVaultScreen({ user, onShowAuth }) {
             width: '56px',
             height: '56px',
             borderRadius: '50%',
-            background: 'rgba(99, 102, 241, 0.15)',
+            background: 'rgba(2, 132, 199, 0.12)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             marginBottom: '16px',
           }}>
-            <svg viewBox="0 0 24 24" width="28" height="28" stroke="#818cf8" fill="none" strokeWidth="2">
+            <svg viewBox="0 0 24 24" width="28" height="28" stroke="#0284c7" fill="none" strokeWidth="2">
               <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
               <path d="M7 11V7a5 5 0 0110 0v4" />
             </svg>
           </div>
-          <h3 style={{ fontSize: '18px', fontWeight: '600', marginBottom: '8px', color: 'var(--text-primary, #fff)' }}>
+          <h3 style={{ fontSize: '18px', fontWeight: '600', marginBottom: '8px', color: 'var(--text-primary)' }}>
             Authentication Required
           </h3>
-          <p style={{ maxWidth: '440px', color: 'var(--text-muted, #94a3b8)', fontSize: '14px', lineHeight: '1.5', marginBottom: '24px' }}>
+          <p style={{ maxWidth: '440px', color: 'var(--text-secondary)', fontSize: '14px', lineHeight: '1.5', marginBottom: '24px' }}>
             Knowledge Vault documents and vector indices are strictly isolated per user account. Please sign in or register to access your private vault.
           </p>
           <button
             type="button"
             className="btn btn-primary"
             onClick={onShowAuth}
-            style={{
-              padding: '10px 24px',
-              fontSize: '14px',
-              fontWeight: '500',
-              borderRadius: '8px',
-              cursor: 'pointer',
-            }}
           >
             Sign In / Register
           </button>
@@ -205,12 +328,26 @@ export default function KnowledgeVaultScreen({ user, onShowAuth }) {
 
   return (
     <section className="screen">
-      <div className="screen-head">
-        <h2 className="screen-title">Knowledge Vault</h2>
-        <p className="screen-sub">
-          Uploaded documents are chunked and vectorized into a local FAISS index + BM25 sparse index.
-          All embeddings stay on-device.
-        </p>
+      <div className="screen-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px' }}>
+        <div>
+          <h2 className="screen-title">Knowledge Vault</h2>
+          <p className="screen-sub">
+            Uploaded documents are chunked and vectorized into a local FAISS index + BM25 sparse index.
+            All embeddings stay on-device.
+          </p>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <button
+            type="button"
+            className={`vault-anim-toggle-btn ${enableAnimation ? 'active' : ''}`}
+            onClick={handleToggleAnimation}
+            title={enableAnimation ? "Machinery animation is ON. Click to disable." : "Machinery animation is OFF (Default). Click to enable."}
+            aria-label="Toggle Ingestion Machinery Animation"
+          >
+            <span className="anim-toggle-dot" />
+            <span>Machinery Animation: <strong>{enableAnimation ? 'ON' : 'OFF'}</strong></span>
+          </button>
+        </div>
       </div>
 
       <div
@@ -241,12 +378,102 @@ export default function KnowledgeVaultScreen({ user, onShowAuth }) {
         />
       </div>
 
-      {uploadStatus && (
-        <div
-          className="inline-note"
-          style={{ marginTop: '14px', width: '100%', textAlign: 'center' }}
-        >
-          {uploadStatus}
+      {/* Department & Classification selectors */}
+      <div style={{
+        display: 'flex',
+        gap: '12px',
+        marginTop: '12px',
+        flexWrap: 'wrap',
+      }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: 1, minWidth: '180px' }}>
+          <label style={{ fontSize: '12px', color: 'var(--text-muted, #94a3b8)', fontWeight: '500', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Department</label>
+          {isSuperadmin ? (
+            <SovereignSelect
+              value={uploadDepartment}
+              onChange={(e) => setUploadDepartment(e.target.value)}
+              options={DEPARTMENT_OPTIONS}
+              id="upload-department"
+              placeholder="Select Department"
+              ariaLabel="Select Department"
+            />
+          ) : (
+            <div className="vault-locked-dept-pill" title="Upload is strictly locked to your assigned department">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                <path d="M7 11V7a5 5 0 0110 0v4" />
+              </svg>
+              <span>DEPT: <strong>{userDept.toUpperCase()}</strong></span>
+              <span className="locked-badge-sub">• ASSIGNED</span>
+            </div>
+          )}
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: 1, minWidth: '180px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <label style={{ fontSize: '12px', color: 'var(--text-muted, #94a3b8)', fontWeight: '500', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Classification</label>
+            {!canSelectRestricted && (
+              <span style={{ fontSize: '11px', color: '#94a3b8' }}>Restricted requires Supervisor</span>
+            )}
+          </div>
+          <SovereignSelect
+            value={uploadClassification}
+            onChange={(e) => setUploadClassification(e.target.value)}
+            options={availableClassificationOptions}
+            id="upload-classification"
+            placeholder="Select Classification"
+            ariaLabel="Select Classification"
+          />
+        </div>
+      </div>
+
+      {/* Prominent Real-Time Ingestion Line (Shows progress and completion when animation toggle is OFF or ON) */}
+      {activeIngestion && (
+        <div className={`vault-ingestion-line-card status-${activeIngestion.status}`} role="status">
+          <div className="ingestion-line-header">
+            <div className="ingestion-line-left">
+              {activeIngestion.status === 'processing' && (
+                <span className="ingestion-spinner" />
+              )}
+              {activeIngestion.status === 'done' && (
+                <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="#10b981" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+              )}
+              {activeIngestion.status === 'error' && (
+                <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="#ef4444" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="12" y1="8" x2="12" y2="12" />
+                  <line x1="12" y1="16" x2="12.01" y2="16" />
+                </svg>
+              )}
+              <div className="ingestion-meta">
+                <span className="ingestion-filename">{activeIngestion.filename}</span>
+                <span className="ingestion-stage">
+                  {activeIngestion.status === 'error' ? activeIngestion.errorMsg : activeIngestion.stage}
+                </span>
+              </div>
+            </div>
+
+            <div className="ingestion-line-right">
+              {activeIngestion.chunkCount !== undefined && activeIngestion.status === 'done' && (
+                <span className="ingestion-chunk-badge">{activeIngestion.chunkCount} chunks added</span>
+              )}
+              <button
+                type="button"
+                className="ingestion-close-btn"
+                onClick={() => setActiveIngestion(null)}
+                title="Dismiss notification"
+              >
+                &times;
+              </button>
+            </div>
+          </div>
+
+          {activeIngestion.status === 'processing' && (
+            <div className="ingestion-progress-track">
+              <div className="ingestion-progress-bar animate-scan" />
+            </div>
+          )}
         </div>
       )}
 
@@ -282,25 +509,6 @@ export default function KnowledgeVaultScreen({ user, onShowAuth }) {
                     onClick={(e) => {
                       e.stopPropagation();
                       setDocToDelete({ filename: fname, chunk_count: doc.chunk_count });
-                    }}
-                    style={{
-                      background: 'transparent',
-                      border: 'none',
-                      color: 'var(--text-muted, #888)',
-                      cursor: 'pointer',
-                      padding: '4px 6px',
-                      borderRadius: '4px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      transition: 'color 0.15s, background 0.15s',
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.color = '#ef4444';
-                      e.currentTarget.style.background = 'rgba(239, 68, 68, 0.15)';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.color = 'var(--text-muted, #888)';
-                      e.currentTarget.style.background = 'transparent';
                     }}
                   >
                     <svg className="icon icon-sm" viewBox="0 0 24 24" style={{ width: '16px', height: '16px', stroke: 'currentColor', fill: 'none', strokeWidth: '2' }}>
@@ -387,6 +595,19 @@ export default function KnowledgeVaultScreen({ user, onShowAuth }) {
             </div>
           </div>
         </div>
+      )}
+
+      {ingestionSession && (
+        <IngestionMachinery
+          file={ingestionSession.file}
+          isProcessing={ingestionSession.isProcessing}
+          result={ingestionSession.result}
+          error={ingestionSession.error}
+          onComplete={() => {
+            setIngestionSession(null);
+            fetchKnowledgeList();
+          }}
+        />
       )}
     </section>
   );

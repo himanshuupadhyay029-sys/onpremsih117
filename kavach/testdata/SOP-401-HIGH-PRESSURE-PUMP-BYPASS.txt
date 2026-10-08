@@ -1,0 +1,24 @@
+STANDARD OPERATING PROCEDURE: SOP-MNT-401
+DOCUMENT CLASSIFICATION: CONFIDENTIAL
+DEPARTMENT: MAINTENANCE / ROTATING EQUIPMENT
+TITLE: HIGH PRESSURE FEED PUMP P-401 EMERGENCY BYPASS AND VALVE ISOLATION
+
+1. PURPOSE & SCOPE
+This document governs emergency and scheduled bypass operations on high pressure feed pump P-401 located in Processing Unit 4. Operating discharge pressures reach 145 bar (2,100 PSI). Strict safety protocols must be followed to avoid catastrophic overpressurization, line rupture, or hazardous fluid release.
+
+2. PREREQUISITES & SAFETY EQUIPMENT
+- Full personal protective equipment (PPE): chemical splash suit, face shield, and self-contained breathing apparatus (SCBA) on standby.
+- Gas detector calibrated for hydrocarbon and H2S detection active within 15 meters.
+- Authorised hot work and bypass permit signed by the Maintenance Approver.
+
+3. EMERGENCY BYPASS EXECUTION SEQUENCE
+Step 1: Verify redundant discharge sensor PT-401B is operational and reading baseline pressure.
+Step 2: Notify the Central Control Room (CCR) before opening bypass valve MOV-401-BP.
+Step 3: Gradually crack bypass valve MOV-401-BP by 15% to relieve line differential pressure. Monitor flow telemetry for cavitational vibration.
+Step 4: Once bypass flow reaches 45 cubic meters/hour, manually depressurize the strainer casing using bleed valve BV-12.
+Step 5: Engage the manual mechanical lock on isolation gate valve GV-401-IN. Do not attempt an emergency override of the interlock without supervisory authorization.
+
+4. POST-BYPASS VERIFICATION & RE-ALIGNMENT
+- Inspect seal flush fluid reservoir level and record differential pressure across orifice RO-401.
+- Log final stabilization pressures in the maintenance dispatch log.
+- Ensure automated shutdown trip alarms are restored to ACTIVE state within 30 minutes of maintenance completion.

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { API_BASE } from '../config';
+import SovereignSelect from './SovereignSelect';
 
 
 export default function AuthModal({ onClose, onAuthSuccess }) {
@@ -8,6 +9,8 @@ export default function AuthModal({ onClose, onAuthSuccess }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [role, setRole] = useState('engineer');
+  const [department, setDepartment] = useState('general');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -52,7 +55,13 @@ export default function AuthModal({ onClose, onAuthSuccess }) {
     const body =
       mode === 'login'
         ? { email: email.trim().toLowerCase(), password }
-        : { name: name.trim(), email: email.trim().toLowerCase(), password };
+        : {
+            name: name.trim(),
+            email: email.trim().toLowerCase(),
+            password,
+            role,
+            department,
+          };
 
     try {
       const res = await fetch(url, {
@@ -61,7 +70,12 @@ export default function AuthModal({ onClose, onAuthSuccess }) {
         credentials: 'include',
         body: JSON.stringify(body),
       });
-      const data = await res.json();
+      let data;
+      try {
+        data = await res.json();
+      } catch {
+        data = { detail: res.statusText || `Server error (${res.status})` };
+      }
 
       if (!res.ok) {
         throw new Error(data.detail || `Error ${res.status}`);
@@ -78,7 +92,12 @@ export default function AuthModal({ onClose, onAuthSuccess }) {
             password,
           }),
         });
-        const loginData = await loginRes.json();
+        let loginData;
+        try {
+          loginData = await loginRes.json();
+        } catch {
+          loginData = { detail: loginRes.statusText || `Server error (${loginRes.status})` };
+        }
         if (!loginRes.ok) {
           throw new Error(loginData.detail || 'Login after registration failed.');
         }
@@ -170,20 +189,58 @@ export default function AuthModal({ onClose, onAuthSuccess }) {
           </div>
 
           {mode === 'register' && (
-            <div className="auth-field">
-              <label className="auth-label" htmlFor="auth-confirm-password">
-                Confirm Password
-              </label>
-              <input
-                className="auth-input"
-                type="password"
-                id="auth-confirm-password"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                placeholder="••••••••"
-                autoComplete="new-password"
-              />
-            </div>
+            <>
+              <div className="auth-field">
+                <label className="auth-label" htmlFor="auth-confirm-password">
+                  Confirm Password
+                </label>
+                <input
+                  className="auth-input"
+                  type="password"
+                  id="auth-confirm-password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  placeholder="••••••••"
+                  autoComplete="new-password"
+                />
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                <div className="auth-field">
+                  <label className="auth-label" htmlFor="auth-role">Role</label>
+                  <SovereignSelect
+                    id="auth-role"
+                    value={role}
+                    onChange={(e) => setRole(e.target.value)}
+                    options={[
+                      { value: 'engineer', label: 'Engineer (Standard)' },
+                      { value: 'approver', label: 'Approver (Manager)' },
+                      { value: 'admin', label: 'Admin' },
+                      { value: 'auditor', label: 'Auditor' },
+                    ]}
+                    placeholder="Select Role"
+                    ariaLabel="Select Role"
+                  />
+                </div>
+
+                <div className="auth-field">
+                  <label className="auth-label" htmlFor="auth-department">Department</label>
+                  <SovereignSelect
+                    id="auth-department"
+                    value={department}
+                    onChange={(e) => setDepartment(e.target.value)}
+                    options={[
+                      { value: 'general', label: 'General / Ops' },
+                      { value: 'process', label: 'Process' },
+                      { value: 'maintenance', label: 'Maintenance' },
+                      { value: 'hse', label: 'HSE' },
+                    ]}
+                    placeholder="Select Department"
+                    ariaLabel="Select Department"
+                  />
+                </div>
+              </div>
+            </>
           )}
 
           {error && (
@@ -212,19 +269,10 @@ export default function AuthModal({ onClose, onAuthSuccess }) {
           </button>
         </form>
 
-        <div className="auth-switch">
-          <span>
-            {mode === 'login'
-              ? "Don't have an account?"
-              : 'Already have an account?'}
+        <div className="auth-switch" style={{ flexDirection: 'column', gap: '6px', textAlign: 'center', marginTop: '16px' }}>
+          <span style={{ fontSize: '12px', color: 'var(--text-muted, #94a3b8)', lineHeight: '1.4' }}>
+            Enterprise Air-Gapped Platform · User accounts are strictly provisioned by your plant administrator.
           </span>
-          <button
-            className="auth-switch-btn"
-            onClick={switchMode}
-            id="auth-switch-btn"
-          >
-            {mode === 'login' ? 'Register' : 'Sign In'}
-          </button>
         </div>
       </div>
     </div>

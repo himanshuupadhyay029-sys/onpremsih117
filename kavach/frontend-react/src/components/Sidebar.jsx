@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { API_BASE } from '../config';
 
 export default function Sidebar({
   activeScreen,
@@ -25,6 +26,7 @@ export default function Sidebar({
   const [chatToDelete, setChatToDelete] = useState(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState(null);
+  const [pendingApprovalsCount, setPendingApprovalsCount] = useState(0);
 
   // Close confirmation modal on Escape key
   useEffect(() => {
@@ -76,6 +78,31 @@ export default function Sidebar({
     if (onToggle) onToggle();
     if (onCloseMobile) onCloseMobile();
   };
+
+  useEffect(() => {
+    if (!user || (user.role !== 'approver' && user.role !== 'admin' && user.role !== 'superadmin')) {
+      setPendingApprovalsCount(0);
+      return;
+    }
+    let isMounted = true;
+    const fetchCount = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/approvals/count`, { credentials: 'include' });
+        if (res.ok) {
+          const data = await res.json();
+          if (isMounted) setPendingApprovalsCount(data.pending_count || 0);
+        }
+      } catch {
+        // ignore
+      }
+    };
+    fetchCount();
+    const interval = setInterval(fetchCount, 6000);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, [user, activeScreen]);
 
   return (
     <aside className={`sidebar ${mobileNavOpen ? 'is-mobile-open' : ''}`} id="sidebar">
@@ -233,17 +260,53 @@ export default function Sidebar({
           <span>Audit Log</span>
         </button>
 
-        <button
-          className={`nav-item ${activeScreen === 'models' ? 'is-active' : ''}`}
-          onClick={() => onSelectScreen('models')}
-        >
-          <svg className="icon" viewBox="0 0 24 24">
-            <path d="M12 2L2 7l10 5 10-5-10-5z" />
-            <path d="M2 17l10 5 10-5" />
-            <path d="M2 12l10 5 10-5" />
-          </svg>
-          <span>Model Settings</span>
-        </button>
+        {/* Approvals Dashboard — approver, admin & superadmin */}
+        {user && (user.role === 'approver' || user.role === 'admin' || user.role === 'superadmin') && (
+          <button
+            className={`nav-item ${activeScreen === 'approvals' ? 'is-active' : ''}`}
+            onClick={() => onSelectScreen('approvals')}
+          >
+            <svg className="icon" viewBox="0 0 24 24">
+              <path d="M9 11l3 3L22 4" stroke="currentColor" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" stroke="currentColor" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            <span style={{ flex: 1, textAlign: 'left' }}>Approvals</span>
+            {pendingApprovalsCount > 0 && (
+              <span className="sidebar-badge-count">{pendingApprovalsCount}</span>
+            )}
+          </button>
+        )}
+
+        {/* Model Settings — superadmin only */}
+        {user && user.role === 'superadmin' && (
+          <button
+            className={`nav-item ${activeScreen === 'models' ? 'is-active' : ''}`}
+            onClick={() => onSelectScreen('models')}
+          >
+            <svg className="icon" viewBox="0 0 24 24">
+              <path d="M12 2L2 7l10 5 10-5-10-5z" />
+              <path d="M2 17l10 5 10-5" />
+              <path d="M2 12l10 5 10-5" />
+            </svg>
+            <span>Model Settings</span>
+          </button>
+        )}
+
+        {/* User Management — admin & superadmin */}
+        {user && (user.role === 'admin' || user.role === 'superadmin') && (
+          <button
+            className={`nav-item ${activeScreen === 'users' ? 'is-active' : ''}`}
+            onClick={() => onSelectScreen('users')}
+          >
+            <svg className="icon" viewBox="0 0 24 24">
+              <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" stroke="currentColor" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              <circle cx="9" cy="7" r="4" stroke="currentColor" fill="none" strokeWidth="2" />
+              <path d="M23 21v-2a4 4 0 00-3-3.87" stroke="currentColor" fill="none" strokeWidth="2" strokeLinecap="round" />
+              <path d="M16 3.13a4 4 0 010 7.75" stroke="currentColor" fill="none" strokeWidth="2" strokeLinecap="round" />
+            </svg>
+            <span>User Management</span>
+          </button>
+        )}
       </nav>
 
       {/* User profile block or sign-in prompt */}
@@ -256,6 +319,18 @@ export default function Sidebar({
             <div className="user-info">
               <div className="user-name">{user.name}</div>
               <div className="user-email">{user.email}</div>
+              {user.role && (
+                <div style={{
+                  fontSize: '10px',
+                  color: user.role === 'superadmin' ? '#ef4444' : user.role === 'admin' ? '#f59e0b' : user.role === 'approver' ? '#10b981' : user.role === 'auditor' ? '#06b6d4' : '#818cf8',
+                  fontWeight: '600',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em',
+                  marginTop: '2px',
+                }}>
+                  {user.role === 'superadmin' ? 'ROOT SUPERADMIN' : `${user.role} · ${user.department || 'general'}`}
+                </div>
+              )}
             </div>
             <button
               className="logout-btn"

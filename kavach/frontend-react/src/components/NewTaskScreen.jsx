@@ -87,6 +87,7 @@ export default function NewTaskScreen({
   user,
   activeChatId,
   setActiveChatId,
+  chatSelectTrigger = 0,
   onShowAuth,
   onChatsUpdated,
   runningChats,
@@ -121,6 +122,7 @@ export default function NewTaskScreen({
   const lastLoadedChatIdRef = useRef(undefined);
   const activeChatIdRef = useRef(activeChatId);
   const chatSessionsRef = useRef(new Map());
+  const prevTriggerRef = useRef(chatSelectTrigger);
 
   useEffect(() => {
     activeChatIdRef.current = activeChatId;
@@ -231,10 +233,28 @@ export default function NewTaskScreen({
     }
   };
 
-  // Load chat messages when activeChatId changes
+  // Load chat messages when activeChatId changes or user explicitly clicks a chat
   useEffect(() => {
-    // If activeChatId matches what is already loaded/in-memory, do nothing
-    if (activeChatId === lastLoadedChatIdRef.current) {
+    const isExplicitUserClick = chatSelectTrigger !== prevTriggerRef.current;
+    prevTriggerRef.current = chatSelectTrigger;
+
+    if (!activeChatId) {
+      lastLoadedChatIdRef.current = null;
+      setMessages([]);
+      setTaskInput('');
+      setAttachedFiles([]);
+      setTaggedVaultFiles([]);
+      setApprovalOutcome({});
+      return;
+    }
+
+    // If user is not yet logged in / authenticated, wait until user is known
+    if (!user) {
+      return;
+    }
+
+    // If activeChatId matches what is already loaded, has messages, and is NOT an explicit user click, skip
+    if (activeChatId === lastLoadedChatIdRef.current && messages.length > 0 && !isExplicitUserClick) {
       return;
     }
 
@@ -281,9 +301,6 @@ export default function NewTaskScreen({
     setRunning(false);
     setIsThinking(false);
 
-    if (!activeChatId) {
-      return;
-    }
     let cancelled = false;
     (async () => {
       try {
@@ -306,7 +323,7 @@ export default function NewTaskScreen({
     return () => {
       cancelled = true;
     };
-  }, [activeChatId]);
+  }, [activeChatId, user, chatSelectTrigger]);
 
   // Auto-scroll to bottom of thread
   useEffect(() => {
@@ -768,14 +785,13 @@ export default function NewTaskScreen({
       );
     }, 1000);
 
-    let streamUrl = `${API_BASE}/run/stream?task=${encodeURIComponent(fullTask)}&task_id=${encodeURIComponent(taskId)}${activeChatId ? `&chat_id=${encodeURIComponent(activeChatId)}` : ''}${attachmentType ? `&attachment_type=${encodeURIComponent(attachmentType)}` : ''}`;
+    let streamUrl = `${API_BASE}/run/stream?task=${encodeURIComponent(fullTask)}&task_id=${encodeURIComponent(taskId)}${activeChatId ? `&chat_id=${encodeURIComponent(activeChatId)}` : ''}${attachmentType ? `&attachment_type=${encodeURIComponent(attachmentType)}` : ''}${user?.department ? `&department=${encodeURIComponent(user.department)}` : ''}${user?.id ? `&user_id=${encodeURIComponent(user.id)}` : ''}`;
     if (taggedVaultFiles.length > 0) {
       taggedVaultFiles.forEach((vf) => {
         streamUrl += `&vault_files=${encodeURIComponent(vf)}`;
       });
     }
     const eventSource = new EventSource(streamUrl, { withCredentials: true });
-
     eventSource.addEventListener('chat_init', (e) => {
       try {
         const d = JSON.parse(e.data);

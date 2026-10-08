@@ -46,6 +46,8 @@ def _extract_key_facts(tool: str, output: str, meta: Dict[str, Any], is_error: b
     if is_error:
         facts[f"last_error_{tool}"] = output[:300]
         return facts
+    else:
+        facts[f"last_error_{tool}"] = None
 
     if tool == "calc":
         if meta.get("calc_result") is not None:
@@ -135,9 +137,13 @@ def dispatch_tool(
         role = routing_dec.get("model_role", "reasoning")
         model = registry.get_model(role)
         actor = model
-        llm_prompt = injected_input
-        if state.get("history_context"):
-            llm_prompt = f"{state['history_context']}\nUser query: {injected_input}"
+        system_intro = (
+            "You are KAVACH, an autonomous on-premises industrial operations assistant. "
+            "Provide a direct, helpful, and professional response to the operator. "
+            "If the operator greets you, respond politely and concisely."
+        )
+        history_part = f"\n\n{state['history_context']}" if state.get("history_context") else ""
+        llm_prompt = f"{system_intro}{history_part}\n\nUser: {injected_input}\nAssistant:"
         try:
             output = ollama.generate(model, llm_prompt)
             if not output.strip():
@@ -267,6 +273,7 @@ def dispatch_tool(
             prior_error=prior_error,
             timeout_seconds=CODE_TIMEOUT_SECONDS,
             task_id=state.get("task_id"),
+            user_stdin=state.get("user_stdin"),
         )
         is_error = not code_result.get("success", False)
         if is_error:
@@ -332,17 +339,52 @@ def dispatch_tool(
             sources = structured.get("sources", [])
 
             is_code_doc = any(po.get("tool") in ("code", "calc") for po in state.get("step_outputs", [])) or "code" in str(state.get("shared_memory", "")).lower()
+            # Department resolution hierarchy:
+            # 1. Explicit user department from state
+            # 2. Non-general department from prior retrieved sources
+            # 3. User department looked up by user_id from DB
+            # 4. Department extracted from query / task context (e.g. maintenance, process, hse, projects, finance)
+            # 5. Default to "general"
+            task_dept = state.get("user_department") or "general"
+            if task_dept == "general" and prior_sources:
+                for ps in prior_sources:
+                    if isinstance(ps, dict) and ps.get("department") and ps["department"].lower() != "general":
+                        task_dept = ps["department"]
+                        break
+            uid_str = state.get("user_id")
+            if task_dept == "general" and uid_str:
+                try:
+                    from backend.db.session import SessionLocal
+                    from backend.db.models import User
+                    _db = SessionLocal()
+                    try:
+                        _u = _db.query(User).filter(User.id == uuid.UUID(str(uid_str))).first()
+                        if _u and _u.department and _u.department.lower() != "general":
+                            task_dept = _u.department
+                    finally:
+                        _db.close()
+                except Exception:
+                    pass
+            if task_dept == "general":
+                task_text = f"{state.get('original_task', '')} {structured.get('title', '')}".lower()
+                for dept_candidate in ["maintenance", "process", "hse", "projects", "finance"]:
+                    if dept_candidate in task_text:
+                        task_dept = dept_candidate
+                        break
+
             if is_code_doc:
                 risk_info = {
                     "risk": "low",
                     "confidence": 0.95,
                     "reasoning": "Technical summary document generated from in-session verified code execution results.",
+                    "department": task_dept,
                 }
             else:
                 risk_info = assess_risk(
                     task_type="document",
                     document_content=structured,
                     sources_used=prior_sources if is_doc_grounded else [],
+                    department=task_dept,
                 )
 
             if risk_info.get("risk") in {"medium", "high"}:
@@ -352,6 +394,8 @@ def dispatch_tool(
                     document_content=structured,
                     risk_assessment=risk_info,
                     sources=prior_sources if is_doc_grounded else [],
+                    department=task_dept,
+                    user_id=uid_str,
                 )
                 output = (
                     f"Drafted document '{title}' (Risk: {risk_info['risk'].upper()}, "
@@ -368,6 +412,7 @@ def dispatch_tool(
                     "risk": risk_info["risk"],
                     "confidence": risk_info["confidence"],
                     "reasoning": risk_info["reasoning"],
+                    "department": task_dept,
                     "draft_content": structured,
                 }
             else:

@@ -1,0 +1,17 @@
+CRITICAL SAFETY SYSTEM SPECIFICATION: CSS-HSE-902
+DOCUMENT CLASSIFICATION: RESTRICTED
+DEPARTMENT: HSE (HEALTH, SAFETY & ENVIRONMENT)
+TITLE: CATALYTIC CRACKING REACTOR SAFETY INTERLOCKS AND EMERGENCY VENT PROTOCOL
+
+1. RESTRICTED CLEARANCE MANDATE
+This document contains proprietary sovereign plant architecture and restricted emergency vent shutdown algorithms. Distribution is limited strictly to authorized HSE personnel and certified plant superintendents.
+
+2. PRIMARY TRIP MATRIX & INTERLOCK LOGIC
+- Loop SIS-01: Auto-trip initiator for reactor vessel R-101 overpressurization (Trip Threshold: 42.5 bar).
+- Loop SIS-02: Thermal runaway quench valve activation triggered if bed temperature exceeds 580 deg C.
+- Emergency Vent Valve EV-902: Fast-acting pneumatically actuated quench valve. Full stroke open time: 1.2 seconds into emergency containment scrubber.
+
+3. EMERGENCY OVERRIDE & MANUAL SCRAM INSTRUCTIONS
+- A manual scram or emergency shutdown can only be initiated from console safety station HSE-CS-1.
+- In the event of primary automated sensor communication loss, the physical mechanical lockout pin on emergency bypass valve BV-902-SEC must be pulled manually.
+- Immediate site evacuation siren (Tone 3 - Intermittent Horn) must be sounded prior to manually opening any atmospheric quench vents.

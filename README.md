@@ -1,147 +1,176 @@
-# KAVACH: Sovereign On-Premises Operations Assistant
+# 🛡️ KAVACH (सुरक्षा कवच)
 
-**KAVACH** (सुरक्षा कवच / Shield) is a 100% offline, air-gapped autonomous AI assistant engineered for critical industrial infrastructure. Built for **Smart India Hackathon 2026 (Problem Statement SIH26117)** for **Mangalore Refinery and Petrochemicals Limited (MRPL)**, KAVACH addresses the strict operational demand for an intelligent assistant that runs entirely within an air-gapped perimeter with zero cloud dependencies, verifiable cryptographic isolation, and zero external data leakage.
+### Sovereign on-premise agentic AI workbench for industrial knowledge work
 
-The system combines local LLMs, an agentic decision loop with self-correction, an indexed Knowledge Vault of standard operating procedures (SOPs), an isolated Docker code execution sandbox, OCR/multimodal vision, a deterministic mathematical calculator, a formal document generator, a human approval gate for high-stakes outputs, and a real-time network monitor providing mathematical proof of zero external calls.
 
----
+KAVACH is a local-first prototype for working with confidential procedures, inspection records, technical images and engineering tasks. The operator console connects to a FastAPI service, a LangGraph task loop, locally served Ollama models, a document vault and local tools. It can retrieve source passages, read scans, calculate, run code in Docker and prepare reviewable Office files.
 
-## 1. Prerequisites
+The core workflow runs on equipment controlled by the organization. Model inference uses the configured local Ollama endpoint; the application does not require a hosted AI API for normal task execution. Installers, model weights and Docker images must be obtained **before** a disconnected run. The model catalogue and pull controls in the settings UI are provisioning features and need connectivity when used to download models.
 
-Before installing KAVACH, ensure your Windows host meets the following requirements:
+## What is implemented
 
-- **Operating System:** Windows 10 or Windows 11 (64-bit).
-- **Python 3.11 specifically:** Python 3.11 is required (do **not** use Python 3.12, 3.13, or 3.14). *Why:* Critical compiled C++ extensions (FAISS CPU wheels, image processing libraries, and pytesseract bindings) are stable and tested on 3.11.
-- **Ollama:** Installed and running locally ([ollama.ai](https://ollama.ai)).
-- **Docker Desktop:** Installed and **RUNNING** on Windows with the WSL2 backend. *Why:* Required specifically for the isolated code execution sandbox (`--network none`).
-- **Tesseract OCR:** Installed on Windows (e.g. from UB-Mannheim at `C:\Program Files\Tesseract-OCR\tesseract.exe`).
+| Area | Current implementation |
+| --- | --- |
+| Agent workflow | LangGraph planner, task router, executor, observer, revision, replanning, clarification and final response. The current loop caps plans at eight steps and revisions at two. |
+| Local model roles | Configurable reasoning, code, vision, embedding and reranking roles in [`kavach/backend/models.json`](kavach/backend/models.json). |
+| Knowledge Vault | Text, Markdown, PDF, DOCX and image ingestion; hierarchical chunks; FAISS dense search plus BM25 lexical search, reciprocal-rank fusion, context expansion and local reranking. |
+| Multimodal tools | Tesseract OCR for scans and image-only PDFs; a local vision-model path for image descriptions and questions. |
+| Calculations and code | Model-assisted formula/input extraction followed by an AST arithmetic evaluator; Python, JavaScript and C execution in transient Docker containers. |
+| Deliverables | DOCX, XLSX and PPTX generation. Formal Word drafts assessed as medium or high risk can pause for an authorized approval, edit or rejection decision. |
+| Records and controls | PostgreSQL users, chats, runs and document metadata; role and department checks on supported routes; per-user hash-chained JSONL audit logs; a host connection monitor and optional Windows firewall lockdown. |
 
----
+These components assist an engineer; they do not certify a safety-critical decision. In particular, an image description of a P&ID, gauge or drawing should be checked against the source image by a qualified reviewer.
 
-## 2. Step-by-Step Setup Guide
+## Local architecture
 
-Follow these exact steps in order in a standard PowerShell terminal:
-
-### Step 1: Clone Repository & Enter Directory
-```powershell
-git clone <repository-url>
-cd sih2026/kavach
+```mermaid
+flowchart LR
+    Operator[Operator in React console] --> API[FastAPI on local host]
+    API --> Agent[LangGraph task loop]
+    Agent --> Models[Ollama model roles]
+    Agent --> Vault[Knowledge Vault: FAISS + BM25]
+    Agent --> Tools[OCR, vision, calculator, Docker code, Office files]
+    Agent --> Approval[Word draft approval path]
+    API --> DB[(PostgreSQL)]
+    API --> Audit[Hash-chained local audit log]
+    API --> Shield[Connection monitor / optional firewall control]
 ```
 
-### Step 2: Create and Activate Python 3.11 Virtual Environment
+The model registry currently ships with these assignments:
+
+| Role | Model tag |
+| --- | --- |
+| Reasoning and planning | `gemma3:4b` |
+| Code | `granite4.1:3b` |
+| Vision | `gemma3:4b` |
+| Embeddings | `nomic-embed-text:latest` |
+| Reranking | `gemma3:4b` |
+
+An administrator can change role assignments in the model settings UI. The registry can fall back to another installed model when an assigned tag is unavailable, so check the active assignments before recording a result or demo.
+
+## Local setup
+
+The following path is for **Windows 10/11 with PowerShell**. The backend also uses portable Python, Ollama, Docker and PostgreSQL components on Linux; Windows Defender firewall lockdown and its helper scripts are Windows-specific.
+
+### 1. Install prerequisites
+
+- Python 3.11, Node.js 18+ and npm.
+- Ollama running locally (default endpoint `http://127.0.0.1:11434`).
+- Docker Desktop with its daemon running.
+- Tesseract OCR installed on the host. On Windows, the OCR code checks the usual `C:\Program Files\Tesseract-OCR\tesseract.exe` location.
+
+Clone the repository, then create a Python environment from the `kavach` directory:
+
 ```powershell
+git clone https://github.com/himanshuupadhyay029-sys/onpremsih117.git
+cd onpremsih117\kavach
 py -3.11 -m venv .venv
 .\.venv\Scripts\Activate.ps1
-```
-*(If PowerShell restricts script execution, run `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` first).*
-
-### Step 3: Install Locked Dependencies
-```powershell
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
+cd frontend-react
+npm install
+cd ..
 ```
 
-### Step 4: Pull the 4 Required Local Ollama Models
-Ensure Ollama is running, then pull each model role:
+### 2. Prepare local models and Docker images
+
+Run these downloads **while connected**, before moving to a disconnected environment:
+
 ```powershell
-# 1. Reasoning, Planning, Drafting & Claim Verification (~2.0 GB)
-ollama pull qwen2.5:3b-instruct
+ollama pull gemma3:4b
+ollama pull granite4.1:3b
+ollama pull nomic-embed-text:latest
 
-# 2. Fast Intent Triage & Routing (~1.0 GB)
-ollama pull qwen2.5:1.5b-instruct
-
-# 3. Code Generation & Sandbox Self-Correction (~2.0 GB)
-ollama pull qwen2.5-coder:3b
-
-# 4. Multimodal Vision & Diagram Understanding (~1.8 GB)
-ollama pull moondream:latest
-```
-
-### Step 5: Pull the Sandbox Docker Image
-Pre-pull the lightweight, network-isolated execution image:
-```powershell
+docker pull postgres:16-alpine
 docker pull python:3.11-slim
+docker pull node:20-slim
+docker pull gcc:13-slim
 ```
 
-### Step 6: Verify Services are Active
-```powershell
-# Confirm Ollama models are present
-ollama list
+`gemma3:4b` covers reasoning, vision and reranking in the checked-in registry. The three language images are used by the code sandbox; they are not language models. Verify the local model cache with `ollama list` and the Docker cache with `docker image ls`.
 
-# Confirm Docker daemon is running
-docker ps
-```
+### 3. Start the database and create an administrator
 
----
-
-## 3. Running KAVACH
-
-Start the sovereign FastAPI server using Uvicorn:
+From `onpremsih117\kavach`:
 
 ```powershell
-python -m uvicorn backend.main:app --reload --port 8000
+docker compose up -d postgres
+python -m alembic upgrade head
+python scripts/create_admin.py
 ```
 
-Once started, open your web browser to:
-**`http://127.0.0.1:8000`**
+The compose file uses PostgreSQL 16 and maps host port `5434` to the container. The bootstrap script prompts for an administrator account. Subsequent users can be provisioned through the admin interface and assigned a role and department. The code also permits the first registration to become an administrator, but the bootstrap script is the clearer operator path.
 
-The web interface is 100% self-contained. It contains zero external CDNs, fonts, or scripts, ensuring full operation in completely air-gapped environments.
+The checked-in database credentials and fallback JWT secret are development defaults. Set a private `JWT_SECRET_KEY`, and change the database password and matching `DATABASE_URL`, before using real organizational data.
 
----
+### 4. Run the backend and console locally
 
-## 4. First-Time Setup: Knowledge Vault Ingestion
+In a PowerShell terminal with the virtual environment active:
 
-To enable grounded RAG search and citation, ingest your organization's SOPs and manuals into the Knowledge Vault:
-
-1. Open the web interface at `http://127.0.0.1:8000`.
-2. Click the **Knowledge Vault** tab in the navigation bar.
-3. Upload your SOP documents (`.pdf`, `.md`, `.txt`, `.docx`, or `.png`/`.jpg` scans).
-4. Click **Ingest into Vault**. The server extracts text, chunks content, generates embeddings locally, and indexes them into an offline FAISS vector store.
-
-*(Alternatively, run the batch ingestion script: `python -m backend.vault.ingest`)*.
-
----
-
-## 5. Known Limitations & Technical Realities
-
-To maintain complete engineering credibility during review, KAVACH documents its practical constraints plainly:
-
-1. **Firewall Lockdown Requires Administrator Elevation:**
-   The API-triggered network lockdown feature (`POST /sovereignty/lockdown`) uses Windows Defender Firewall APIs (`netsh advfirewall`). Windows requires elevated permissions to add firewall rules. To use this feature, start the Uvicorn server from a PowerShell terminal opened with **"Run as Administrator"**.
-2. **Tesseract as Primary OCR Engine (PaddlePaddle Windows oneDNN Bug):**
-   PaddleOCR was initially tested but exhibits a severe upstream oneDNN compatibility crash on Windows (`oneDNN: The system cannot find the file specified`). KAVACH uses **Tesseract OCR (`pytesseract`)** as its primary, fully working OCR engine. This is a deliberate, documented architectural fallback.
-3. **OCR / Vision Quality & Image Resolution:**
-   OCR confidence and multimodal understanding depend on scan clarity and resolution. Crisp printed SOPs and digital inspection sheets achieve 70–95% confidence. Degraded hand-written notes or complex piping P&ID schematics receive "assisted understanding", not legally certified engineering interpretations.
-4. **Planner Step-Count Variation:**
-   While Phase 12 introduced soft ceilings and prompt tightening that keeps simple tasks between 1 and 3 steps, small local models (3B parameters) can occasionally plan 2 steps instead of 1 for similar-complexity requests. The agent's observation loop ensures accuracy regardless of step count.
-
----
-
-## 6. Project Structure
-
+```powershell
+python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
 ```
+
+In a second terminal opened in `onpremsih117\kavach`:
+
+```powershell
+cd frontend-react
+npm run dev -- --host 127.0.0.1
+```
+
+Open `http://127.0.0.1:5173` and sign in with the administrator account. The API health endpoint is `http://127.0.0.1:8000/health`; interactive API documentation is at `http://127.0.0.1:8000/docs`.
+
+`kavach/run_backend.ps1` is an alternative Windows runner that checks PostgreSQL, applies migrations and starts Uvicorn. It binds to `0.0.0.0`, so use the loopback command above when you want the API accessible only from the same machine.
+
+## Using the workbench
+
+1. **Upload source material.** In Knowledge Vault, ingest a `.txt`, `.md`, `.pdf`, `.docx`, `.png`, `.jpg`, `.jpeg`, `.tiff`, `.bmp` or `.webp` file. Scanned material is processed through OCR. UI uploads are stored in a per-user vault; documents can be tagged with a department and classification.
+2. **Ask a task.** A request may involve search, OCR/vision, arithmetic, code, a Word document, an Excel workbook or a PowerPoint deck. The planner chooses one or more tool steps and can ask for clarification when essential information is missing.
+3. **Inspect the result.** Retrieval returns source filenames and excerpts; code tasks return execution output; calculation tasks show arithmetic steps. Check source evidence and units before operational use.
+4. **Review formal Word drafts.** When the risk heuristic marks a Word draft medium or high risk, the approval path can hold it for an approver or administrator. The reviewer can approve, edit or reject; department checks apply to approvers.
+
+For bulk ingestion into the separate default CLI index, run `python scripts/ingest_docs.py testdata` from `kavach`. To populate an authenticated user's own vault, use the UI upload flow.
+
+## Local controls and their scope
+
+- **Code isolation:** `backend/tools/sandbox.py` starts Python, Node or GCC containers with `--network none`, a read-only source-file mount, a 256 MB memory limit, a one-CPU limit and a 15-second default wall-clock timeout. Images must be present locally before a disconnected run. These flags isolate the generated code process; they do not make the whole host air-gapped.
+- **Access and review:** Account, vault, audit and approval routes contain authentication, role or department checks. The codebase is a prototype and not every task or model-management endpoint uses the same gate. Keep the API on a trusted local interface and review authorization before wider network exposure.
+- **Audit:** Events are appended to local per-user JSONL files with SHA-256 hash chaining and a verification endpoint. This can reveal changes to recorded entries; a host administrator can still alter or delete local files, so it is not immutable storage.
+- **Network visibility:** The shield monitors observed host connections and records session snapshots locally. Its counters describe observed connections, not a mathematical proof that no data left the machine.
+- **Firewall:** Windows lockdown is optional. Applying Windows Defender rules requires elevated permission through an elevated process, a configured privileged scheduled task or the UI's UAC flow. Check `hardware_enforced` in the firewall status rather than assuming a button press applied rules. Linux has no equivalent Windows firewall control in this repository.
+
+Core inference and document processing use local services after provisioning. Pulling models, packages or Docker images, and querying remote model-catalogue information, are provisioning operations that require connectivity. A disconnected run should be tested on the exact prepared machine.
+
+## Code and checks
+
+The implementation lives under `kavach/`:
+
+```text
 kavach/
-├── backend/            # Core backend application
-│   ├── audit/          # Immutable JSONL audit logbook & hash chaining
-│   ├── brain/          # LangGraph agent loop (plan, execute, observe, revise) & router
-│   ├── engine/         # Ollama engine wrapper & role-based model registry
-│   ├── guard/          # Anti-hallucination verification & human approval gate
-│   ├── sandbox/        # Docker isolated execution sandbox (--network none)
-│   ├── sovereignty/    # Windows firewall lockdown & real-time network sniffer
-│   ├── tools/          # Specialized tools (search, writer, code, calc, ocr, vision)
-│   ├── vault/          # RAG ingestion pipeline, local embedding & FAISS index
-│   ├── config.py       # Central path and runtime configuration
-│   └── main.py         # FastAPI routes and lifecycle orchestration
-├── frontend/           # Sovereign web interface (Vanilla HTML5/CSS3/JS, zero CDNs)
-├── knowledge/          # Knowledge Vault storage (raw documents & indexed SOPs)
-├── outputs/            # Generated deliverables (.docx), audit logs, and temp artifacts
-├── scripts/            # Setup, ingestion, and synthetic scan generators
-├── testdata/           # Test fixtures, evaluation documents, and synthetic scans
-└── requirements.txt    # Locked Python 3.11 dependencies
+├── backend/
+│   ├── brain/          LangGraph planner, router and tool dispatch
+│   ├── engine/         Ollama client and model registry
+│   ├── vault/          Ingestion, FAISS/BM25 retrieval and reranking
+│   ├── tools/          OCR, vision, math, Docker code and Office builders
+│   ├── auth/           Sessions, roles and user management
+│   ├── guard/          Verification and Word approval logic
+│   ├── audit/          Hash-chained event logs
+│   ├── shield/         Connection monitor and Windows firewall control
+│   └── models.json     Checked-in model role assignments
+├── frontend-react/    React/Vite operator console
+├── migrations/        PostgreSQL schema migrations
+├── scripts/           Admin bootstrap, ingestion and firewall helpers
+├── testdata/          Synthetic/example procedures
+├── test_*.py          Component and workflow checks
+└── docker-compose.yml PostgreSQL and optional frontend services
 ```
 
----
+With `pytest` installed in the environment, selected tests can be run from `kavach`:
 
-## 7. Context & Acknowledgements
+```powershell
+python -m pytest test_rbac_approval_audit.py test_code_sandbox.py test_search_improvements.py
+```
 
-Developed for **Smart India Hackathon (SIH) 2026** — Problem Statement **SIH26117** for **Mangalore Refinery and Petrochemicals Limited (MRPL)**.
-KAVACH demonstrates that critical industrial infrastructure can deploy high-capability autonomous AI without transmitting a single byte outside the sovereign perimeter.
+Some checks use mocks; integration behavior also depends on the local Ollama models, PostgreSQL, Docker and Tesseract being available. Treat individual OCR confidence values as engine estimates, not measured transcription accuracy, and validate P&ID interpretation against labeled plant-specific examples before relying on it.
+
+KAVACH addresses the Smart Automation theme . The goal is to bring multi-step AI assistance to industrial knowledge work while keeping the normal inference path and working data within an organization-controlled local environment.

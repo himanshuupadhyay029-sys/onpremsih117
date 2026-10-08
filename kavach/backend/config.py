@@ -13,6 +13,14 @@ from typing import Optional, Tuple
 BACKEND_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = BACKEND_DIR.parent
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv(PROJECT_ROOT / ".env")
+except ImportError:
+    pass
+
+AUTO_LOGIN_SUPERADMIN = os.environ.get("AUTO_LOGIN_SUPERADMIN", "false").strip().lower() in ("true", "1", "yes")
+
 MODELS_JSON_PATH = BACKEND_DIR / "models.json"
 KNOWLEDGE_DIR = PROJECT_ROOT / "knowledge"
 FAISS_INDEX_DIR = KNOWLEDGE_DIR / "faiss_index"
@@ -46,7 +54,11 @@ def get_user_audit_log_path(user_id: str = None) -> Path:
 
 
 # Local Ollama endpoint (strictly offline/local)
-OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
+# On Windows, using 127.0.0.1 avoids the 2-3s IPv6 ::1 lookup timeout caused by 'localhost'
+_raw_ollama_url = os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/")
+if "localhost" in _raw_ollama_url:
+    _raw_ollama_url = _raw_ollama_url.replace("localhost", "127.0.0.1")
+OLLAMA_BASE_URL = _raw_ollama_url
 
 
 # ──────────────────────────────────────────────────────────────────────────

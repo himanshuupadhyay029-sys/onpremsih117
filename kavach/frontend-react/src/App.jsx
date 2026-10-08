@@ -5,6 +5,8 @@ import NewTaskScreen from './components/NewTaskScreen';
 import KnowledgeVaultScreen from './components/KnowledgeVaultScreen';
 import AuditLogScreen from './components/AuditLogScreen';
 import ModelSettingsScreen from './components/ModelSettingsScreen';
+import UserManagementScreen from './components/UserManagementScreen';
+import ApprovalsScreen from './components/ApprovalsScreen';
 import AuthModal from './components/AuthModal';
 import EvaluatorBriefingModal from './components/EvaluatorBriefingModal';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -124,6 +126,8 @@ export default function App() {
     closeMobileNav();
   };
 
+  const [chatSelectTrigger, setChatSelectTrigger] = useState(0);
+
   const handleNewChat = () => {
     setActiveChatId(null);
     setActiveScreen('task');
@@ -133,6 +137,7 @@ export default function App() {
   const handleSelectChat = (chatId) => {
     setActiveChatId(chatId);
     setActiveScreen('task');
+    setChatSelectTrigger((prev) => prev + 1);
     closeMobileNav();
   };
 
@@ -219,6 +224,7 @@ export default function App() {
                 user={user}
                 activeChatId={activeChatId}
                 setActiveChatId={setActiveChatId}
+                chatSelectTrigger={chatSelectTrigger}
                 onShowAuth={() => setShowAuthModal(true)}
                 onChatsUpdated={loadChats}
                 runningChats={runningChats}
@@ -243,9 +249,59 @@ export default function App() {
                 />
               </div>
             )}
+            {activeScreen === 'approvals' && (
+              <div className="screen-pane screen-pane-approvals" style={{ flex: 1, minHeight: 0, height: '100%' }}>
+                {(user?.role === 'approver' || user?.role === 'admin' || user?.role === 'superadmin') ? (
+                  <ApprovalsScreen
+                    user={user}
+                    onShowAuth={() => setShowAuthModal(true)}
+                    onSelectChat={handleSelectChat}
+                  />
+                ) : (
+                  <section className="screen">
+                    <div className="screen-head">
+                      <h2 className="screen-title">Access Restricted</h2>
+                      <p className="screen-sub">
+                        Supervisory approval center is restricted to department approvers, administrators, and superadmin.
+                        Your current role: <strong>{user?.role || 'engineer'}</strong>
+                      </p>
+                    </div>
+                  </section>
+                )}
+              </div>
+            )}
             {activeScreen === 'models' && (
               <div className="screen-pane screen-pane-models" style={{ flex: 1, minHeight: 0, height: '100%' }}>
-                <ModelSettingsScreen />
+                {user?.role === 'superadmin' ? (
+                  <ModelSettingsScreen />
+                ) : (
+                  <section className="screen">
+                    <div className="screen-head">
+                      <h2 className="screen-title">Access Restricted</h2>
+                      <p className="screen-sub">
+                        Model settings and neural runtime management is restricted to the Sovereign Root Superadmin.
+                        Your current role: <strong>{user?.role || 'engineer'}</strong>
+                      </p>
+                    </div>
+                  </section>
+                )}
+              </div>
+            )}
+            {activeScreen === 'users' && (
+              <div className="screen-pane screen-pane-users" style={{ flex: 1, minHeight: 0, height: '100%' }}>
+                {(user?.role === 'admin' || user?.role === 'superadmin') ? (
+                  <UserManagementScreen user={user} />
+                ) : (
+                  <section className="screen">
+                    <div className="screen-head">
+                      <h2 className="screen-title">Access Restricted</h2>
+                      <p className="screen-sub">
+                        User management is restricted to administrators and superadmin.
+                        Your current role: <strong>{user?.role || 'engineer'}</strong>
+                      </p>
+                    </div>
+                  </section>
+                )}
               </div>
             )}
           </ErrorBoundary>
