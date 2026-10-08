@@ -145,7 +145,7 @@ export default function EvaluatorBriefingModal({ isOpen, onClose }) {
               </div>
               <h4 className="bic-title">Demo Uses HuggingFace</h4>
               <p className="bic-desc">
-                This live link uses HF Inference API as a remote fallback so judges can test workflows without local GPU setup.
+                This web demo uses HuggingFace serverless inference (<code>Qwen2.5-7B</code>, <code>Granite-3.3-8B</code>, <code>Qwen2-VL</code>) so evaluators can test live workflows without local GPU hardware.
               </p>
             </div>
 
@@ -157,7 +157,7 @@ export default function EvaluatorBriefingModal({ isOpen, onClose }) {
               </div>
               <h4 className="bic-title">Identical Agentic Engine</h4>
               <p className="bic-desc">
-                Same LangGraph planner, FAISS Knowledge Vault, audit trail, and Human Approval Gate — only model source differs.
+                Same LangGraph planner, FAISS Knowledge Vault, audit trail, and Human Approval Gate — on-premises production runs strictly on local Ollama.
               </p>
             </div>
 
@@ -172,7 +172,7 @@ export default function EvaluatorBriefingModal({ isOpen, onClose }) {
                 <line x1="12" y1="17" x2="12" y2="21" />
               </svg>
               <span>On-Premises Production Models</span>
-              <span className="bms-note">(local Ollama — no internet)</span>
+              <span className="bms-note">(Local Ollama on-prem · Cloud demo falls back to HF equivalents)</span>
             </div>
 
             <div className="bms-model-rows">
@@ -180,19 +180,19 @@ export default function EvaluatorBriefingModal({ isOpen, onClose }) {
                 <span className="bms-flag">🇺🇸</span>
                 <code className="bms-model-name">gemma3:4b</code>
                 <span className="bms-role-badge bms-role--reason">Reasoning · Vision</span>
-                <span className="bms-origin">Google DeepMind</span>
+                <span className="bms-origin">Local Ollama (Cloud: Qwen2.5-7B / Qwen2-VL)</span>
               </div>
               <div className="bms-model-row">
                 <span className="bms-flag">🇺🇸</span>
                 <code className="bms-model-name">granite4.1:3b</code>
                 <span className="bms-role-badge bms-role--code">Code</span>
-                <span className="bms-origin">IBM Research</span>
+                <span className="bms-origin">Local Ollama (Cloud: Granite-3.3-8B)</span>
               </div>
               <div className="bms-model-row">
                 <span className="bms-flag">🇺🇸</span>
                 <code className="bms-model-name">nomic-embed-text</code>
                 <span className="bms-role-badge bms-role--embed">Embeddings</span>
-                <span className="bms-origin">Nomic AI</span>
+                <span className="bms-origin">Local FAISS (Cloud: nomic-embed-v1.5)</span>
               </div>
             </div>
 
