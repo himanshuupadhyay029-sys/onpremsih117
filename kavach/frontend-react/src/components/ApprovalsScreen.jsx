@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import SovereignSelect from './SovereignSelect';
+import { API_BASE } from '../config';
 
 const DEPT_FILTER_OPTIONS = [
   { value: 'all', label: 'All Departments' },
@@ -82,7 +83,7 @@ export default function ApprovalsScreen({ user, onShowAuth, onSelectChat }) {
     setIsLoading(true);
     setError(null);
     try {
-      const res = await fetch('/approvals/pending', { credentials: 'include' });
+      const res = await fetch(`${API_BASE}/approvals/pending`, { credentials: 'include' });
       if (!res.ok) {
         throw new Error(`Failed to load pending approvals: ${res.statusText}`);
       }
@@ -101,7 +102,7 @@ export default function ApprovalsScreen({ user, onShowAuth, onSelectChat }) {
     setIsLoading(true);
     setError(null);
     try {
-      const res = await fetch('/approvals/history', { credentials: 'include' });
+      const res = await fetch(`${API_BASE}/approvals/history`, { credentials: 'include' });
       if (!res.ok) {
         throw new Error(`Failed to load approval history: ${res.statusText}`);
       }
@@ -131,7 +132,7 @@ export default function ApprovalsScreen({ user, onShowAuth, onSelectChat }) {
     setProcessingTaskId(taskId);
     setActionSuccess(null);
     try {
-      const res = await fetch(`/approval/${encodeURIComponent(taskId)}`, {
+      const res = await fetch(`${API_BASE}/approval/${encodeURIComponent(taskId)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -242,7 +243,7 @@ export default function ApprovalsScreen({ user, onShowAuth, onSelectChat }) {
         },
       };
 
-      const res = await fetch(`/approval/${encodeURIComponent(editingTask.task_id)}`, {
+      const res = await fetch(`${API_BASE}/approval/${encodeURIComponent(editingTask.task_id)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -274,7 +275,7 @@ export default function ApprovalsScreen({ user, onShowAuth, onSelectChat }) {
     setProcessingTaskId(rejectingTask.task_id);
     setActionSuccess(null);
     try {
-      const res = await fetch(`/approval/${encodeURIComponent(rejectingTask.task_id)}`, {
+      const res = await fetch(`${API_BASE}/approval/${encodeURIComponent(rejectingTask.task_id)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',

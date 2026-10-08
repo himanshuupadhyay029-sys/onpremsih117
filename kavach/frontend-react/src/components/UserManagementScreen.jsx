@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import SovereignSelect from './SovereignSelect';
+import { API_BASE } from '../config';
 
 export default function UserManagementScreen({ user }) {
   const isSuperadmin = user?.role === 'superadmin';
@@ -67,9 +68,9 @@ export default function UserManagementScreen({ user }) {
     try {
       setLoading(true);
       const [uRes, dRes, rRes] = await Promise.all([
-        fetch('/auth/users', { credentials: 'include' }),
-        fetch('/auth/departments', { credentials: 'include' }),
-        fetch('/auth/roles', { credentials: 'include' }),
+        fetch(`${API_BASE}/auth/users`, { credentials: 'include' }),
+        fetch(`${API_BASE}/auth/departments`, { credentials: 'include' }),
+        fetch(`${API_BASE}/auth/roles`, { credentials: 'include' }),
       ]);
 
       if (uRes.ok) setUsers(await uRes.json());
@@ -95,7 +96,7 @@ export default function UserManagementScreen({ user }) {
     }
     setActionLoading(true);
     try {
-      const res = await fetch('/auth/users', {
+      const res = await fetch(`${API_BASE}/auth/users`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -127,7 +128,7 @@ export default function UserManagementScreen({ user }) {
       if (editData.department) payload.department = editData.department;
       if (editData.password && editData.password.trim()) payload.password = editData.password.trim();
 
-      const res = await fetch(`/auth/users/${editingUser.id}`, {
+      const res = await fetch(`${API_BASE}/auth/users/${editingUser.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -151,7 +152,7 @@ export default function UserManagementScreen({ user }) {
     if (!deletingUser) return;
     setActionLoading(true);
     try {
-      const res = await fetch(`/auth/users/${deletingUser.id}`, {
+      const res = await fetch(`${API_BASE}/auth/users/${deletingUser.id}`, {
         method: 'DELETE',
         credentials: 'include',
       });
@@ -173,7 +174,7 @@ export default function UserManagementScreen({ user }) {
     if (!deletingDept) return;
     setActionLoading(true);
     try {
-      const res = await fetch(`/auth/departments/${deletingDept.id || deletingDept.name}`, {
+      const res = await fetch(`${API_BASE}/auth/departments/${deletingDept.id || deletingDept.name}`, {
         method: 'DELETE',
         credentials: 'include',
       });
@@ -195,7 +196,7 @@ export default function UserManagementScreen({ user }) {
     if (!deletingRole) return;
     setActionLoading(true);
     try {
-      const res = await fetch(`/auth/roles/${deletingRole.id || deletingRole.name}`, {
+      const res = await fetch(`${API_BASE}/auth/roles/${deletingRole.id || deletingRole.name}`, {
         method: 'DELETE',
         credentials: 'include',
       });
@@ -218,7 +219,7 @@ export default function UserManagementScreen({ user }) {
     if (!newDeptData.name.trim()) return;
     setActionLoading(true);
     try {
-      const res = await fetch('/auth/departments', {
+      const res = await fetch(`${API_BASE}/auth/departments`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -244,7 +245,7 @@ export default function UserManagementScreen({ user }) {
     if (!newRoleData.name.trim()) return;
     setActionLoading(true);
     try {
-      const res = await fetch('/auth/roles', {
+      const res = await fetch(`${API_BASE}/auth/roles`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -277,9 +278,9 @@ export default function UserManagementScreen({ user }) {
 
   return (
     <section className="screen screen-wide">
-      <div className="screen-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px' }}>
+      <div className="screen-head user-mgt-head">
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <div className="user-mgt-title-row">
             <h2 className="screen-title" style={{ margin: 0 }}>User & Access Management</h2>
             <span style={{
               fontSize: '11px',
@@ -301,7 +302,7 @@ export default function UserManagementScreen({ user }) {
               : `Departmental scope: managing operators, approvers, and engineers strictly within the ${userDept.toUpperCase()} department.`}
           </p>
         </div>
-        <div style={{ display: 'flex', gap: '8px' }}>
+        <div className="user-mgt-tabs">
           <button
             className={`btn ${activeTab === 'users' ? 'btn-primary' : 'btn-secondary'}`}
             onClick={() => setActiveTab('users')}
@@ -338,17 +339,16 @@ export default function UserManagementScreen({ user }) {
       {/* TAB 1: USERS DIRECTORY */}
       {activeTab === 'users' && (
         <>
-          <div className="filters" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px', gap: '12px' }}>
+          <div className="filters user-mgt-filters">
             <input
-              className="field"
+              className="field user-search-input"
               type="search"
               placeholder="Search user by name, email, role, or department…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              style={{ flex: 1, maxWidth: '420px', borderRadius: 'var(--radius-pill)', height: '40px', padding: '0 18px' }}
             />
             <button
-              className="btn btn-primary"
+              className="btn btn-primary btn-provision-user"
               onClick={() => setShowProvisionModal(true)}
               style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
             >
@@ -364,14 +364,8 @@ export default function UserManagementScreen({ user }) {
           ) : filteredUsers.length === 0 ? (
             <div className="empty">No matching users found.</div>
           ) : (
-            <div style={{
-              background: '#ffffff',
-              border: '1px solid var(--border)',
-              borderRadius: 'var(--radius-lg)',
-              overflow: 'hidden',
-              boxShadow: 'var(--shadow-card)',
-            }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
+            <div className="user-mgt-table-card">
+              <table className="user-mgt-table">
                 <thead>
                   <tr style={{
                     borderBottom: '1px solid #e2e8f0',
@@ -502,7 +496,7 @@ export default function UserManagementScreen({ user }) {
               </span>
             </div>
           )}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
+          <div className="depts-roles-grid">
             {/* Departments Column */}
             <div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>

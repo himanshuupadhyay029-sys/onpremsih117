@@ -7068,7 +7068,7 @@ select {
 }
 
 /* ==========================================================================
-   MOBILE RESPONSIVENESS & TOUCH OPTIMIZATION (<= 768px)
+   MOBILE RESPONSIVENESS & TOUCH OPTIMIZATION (<= 768px and <= 480px)
    ========================================================================== */
 
 @keyframes backdropFadeIn {
@@ -7125,25 +7125,28 @@ select {
     transform: translateX(0);
   }
 
-  /* 3. TopBar & Sovereignty Status */
+  /* 3. TopBar Adaptive Mobile Header */
   .sidebar-expand-btn {
     display: grid !important;
   }
 
   .topbar {
-    padding: 10px 14px;
-    gap: 8px;
+    padding: 8px 12px;
+    gap: 6px;
+    min-height: 52px;
   }
 
   .topbar-left {
-    gap: 8px;
+    gap: 6px;
     min-width: 0;
     flex-shrink: 1;
+    overflow: hidden;
   }
 
   .topbar-right {
-    gap: 8px;
+    gap: 6px;
     flex-shrink: 0;
+    align-items: center;
   }
 
   .cloud-badge-full,
@@ -7159,72 +7162,295 @@ select {
   }
 
   .cloud-badge {
-    padding: 2px 7px;
-    font-size: 0.7rem;
-    max-width: 90px;
+    padding: 3px 8px;
+    font-size: 11px;
+    max-width: 100px;
     overflow: hidden;
     text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .sovereignty {
     font-size: 11px;
+    padding: 4px 8px;
     gap: 5px;
+    white-space: nowrap;
   }
 
   .lock-toggle {
-    padding: 5px 9px;
+    padding: 4px 8px;
     font-size: 11px;
-    gap: 5px;
-    min-height: 32px;
+    gap: 4px;
+    min-height: 30px;
+    white-space: nowrap;
   }
 
   .inline-note {
     font-size: 11px;
     padding: 3px 8px;
-    max-width: 90%;
+    max-width: 94%;
     margin: 4px auto 0;
     text-align: center;
   }
 
-  /* 4. Screen Containers */
+  /* 4. Screen Containers & Headings */
   .screens {
-    padding: 0 14px 20px;
+    padding: 0 12px 20px;
   }
 
   .screens.screens-chat {
     padding: 0;
   }
 
+  .screen {
+    padding: 14px 4px;
+  }
+
   .screen-head {
-    margin-bottom: 16px;
+    margin-bottom: 14px;
   }
 
   .screen-title {
-    font-size: 20px;
+    font-size: 19px;
   }
 
   .screen-sub {
+    font-size: 12.5px;
+    line-height: 1.45;
+  }
+
+  /* 5. User Management Screen Responsive Overhaul */
+  .user-mgt-head {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 12px !important;
+  }
+
+  .user-mgt-title-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 4px;
+  }
+
+  .user-mgt-tabs {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    gap: 8px !important;
+    width: 100% !important;
+  }
+
+  .user-mgt-tabs .btn {
+    flex: 1 !important;
+    min-width: 130px !important;
+    text-align: center !important;
+    justify-content: center !important;
+    padding: 8px 10px !important;
+    font-size: 12px !important;
+  }
+
+  .user-mgt-filters {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 10px !important;
+    width: 100% !important;
+    margin-bottom: 14px !important;
+  }
+
+  .user-search-input {
+    width: 100% !important;
+    max-width: 100% !important;
+    height: 42px !important;
+    font-size: 16px !important;
+    padding: 0 14px !important;
+  }
+
+  .btn-provision-user {
+    width: 100% !important;
+    justify-content: center !important;
+    min-height: 42px !important;
+  }
+
+  .user-mgt-table-card {
+    background: #ffffff;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    box-shadow: var(--shadow-card);
+    margin-bottom: 16px;
+  }
+
+  .user-mgt-table {
+    width: 100%;
+    min-width: 560px;
+    border-collapse: collapse;
+    text-align: left;
     font-size: 13px;
   }
 
-  /* 5. Chat Landing & Suggestion Chips */
+  .depts-roles-grid {
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+    gap: 18px !important;
+    width: 100% !important;
+  }
+
+  /* 6. Approvals Screen Responsive Overhaul */
+  .approvals-header {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 12px !important;
+  }
+
+  .approvals-tabs {
+    display: flex !important;
+    width: 100% !important;
+    gap: 8px !important;
+  }
+
+  .approvals-tabs .btn {
+    flex: 1 !important;
+    justify-content: center !important;
+    font-size: 12.5px !important;
+  }
+
+  .approval-filters {
+    display: flex !important;
+    flex-direction: column !important;
+    width: 100% !important;
+    gap: 10px !important;
+  }
+
+  .approval-filter-item {
+    width: 100% !important;
+  }
+
+  .approval-card {
+    padding: 14px 12px !important;
+    border-radius: var(--radius-lg) !important;
+    margin-bottom: 14px !important;
+  }
+
+  .approval-card-head {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 8px !important;
+  }
+
+  .approval-card-meta {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    gap: 6px !important;
+    width: 100% !important;
+  }
+
+  .approval-card-actions {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 8px !important;
+    width: 100% !important;
+    margin-top: 14px !important;
+  }
+
+  .approval-card-actions .btn {
+    width: 100% !important;
+    justify-content: center !important;
+    min-height: 40px !important;
+    font-size: 12.5px !important;
+    padding: 8px 10px !important;
+  }
+
+  .history-table-container {
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+    border-radius: var(--radius-lg) !important;
+  }
+
+  .history-table {
+    min-width: 560px !important;
+  }
+
+  /* 7. Model Settings Screen Responsive Overhaul */
+  .models-registry-grid {
+    grid-template-columns: 1fr !important;
+    gap: 14px !important;
+  }
+
+  .pull-model-row {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 10px !important;
+  }
+
+  .pull-model-row .field {
+    width: 100% !important;
+  }
+
+  .model-card-actions {
+    flex-direction: column !important;
+    gap: 6px !important;
+    width: 100% !important;
+  }
+
+  .model-card-actions .btn {
+    width: 100% !important;
+    justify-content: center !important;
+    min-height: 40px !important;
+  }
+
+  /* 8. Knowledge Vault Screen */
+  .dropzone {
+    padding: 20px 14px;
+  }
+
+  .dropzone-text-desktop {
+    display: none !important;
+  }
+
+  .dropzone-text-mobile {
+    display: block !important;
+    font-weight: 500;
+  }
+
+  .dropzone-hint {
+    font-size: 11.5px;
+  }
+
+  .doc-row {
+    padding: 10px 12px;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .doc-meta {
+    flex-wrap: wrap;
+    gap: 6px;
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  /* 9. Chat Landing & Fixed Composer */
   .landing-hero {
-    padding: 24px 14px 16px;
+    padding: 20px 12px 14px;
   }
 
   .greeting {
-    font-size: 22px;
+    font-size: 21px;
     gap: 8px;
   }
 
   .greeting-icon {
-    width: 22px;
-    height: 22px;
+    width: 20px;
+    height: 20px;
   }
 
   .suggestion-chips {
     gap: 6px;
-    margin-top: 14px;
+    margin-top: 12px;
     width: 100%;
   }
 
@@ -7234,15 +7460,14 @@ select {
     min-height: 38px;
   }
 
-  /* 6. Continuous Chat Thread & Bubbles */
   .chat-thread {
-    padding: 14px 12px 16px;
-    gap: 14px;
+    padding: 12px 10px 16px;
+    gap: 12px;
   }
 
   .chat-msg-user {
-    max-width: 90%;
-    padding: 8px 13px;
+    max-width: 92%;
+    padding: 8px 12px;
     font-size: 14px;
   }
 
@@ -7250,12 +7475,6 @@ select {
     font-size: 14px;
   }
 
-  .chat-user-attachment {
-    max-width: 100%;
-    font-size: 11.5px;
-  }
-
-  /* 7. Fixed Bottom Chat Composer */
   .chat-composer-fixed {
     padding: 0 8px calc(8px + env(safe-area-inset-bottom, 0px));
   }
@@ -7287,215 +7506,83 @@ select {
     min-width: 36px;
   }
 
-  /* 8. Knowledge Vault Mention Popover */
-  .mention-popover {
-    left: 0 !important;
-    right: 0 !important;
-    width: 100% !important;
-    max-width: 100% !important;
-    max-height: 220px;
-    bottom: calc(100% + 6px);
-  }
-
-  .mention-hint-key {
-    display: none !important;
-  }
-
-  .mention-hint-touch {
-    display: inline !important;
-  }
-
-  .mention-item {
-    padding: 9px 10px;
-    font-size: 13px;
-    min-height: 42px;
-  }
-
-  /* 9. Interactive Deliverables & Code Sandbox */
-  .deliverable-card {
-    padding: 12px 14px;
-  }
-
-  .deliverable-header {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 6px;
-  }
-
-  .download-btn {
-    width: 100%;
-    justify-content: center;
-    padding: 10px 14px;
-    font-size: 13px;
-    min-height: 42px;
-  }
-
-  .deliverable-meta-details {
-    gap: 8px;
-    font-size: 11.5px;
-  }
-
-  .code-wrap {
-    padding: 10px 12px;
-    font-size: 12px;
-  }
-
-  .code-header {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 6px;
-  }
-
-  .step {
-    padding: 8px 10px;
-    font-size: 12.5px;
-  }
-
-  .step-tool-row {
-    flex-wrap: wrap;
-    gap: 4px;
-  }
-
-  /* 10. Knowledge Vault Screen */
-  .dropzone {
-    padding: 22px 14px;
-  }
-
-  .dropzone-text-desktop {
-    display: none !important;
-  }
-
-  .dropzone-text-mobile {
-    display: block !important;
-    font-weight: 500;
-  }
-
-  .dropzone-hint {
-    font-size: 11.5px;
-  }
-
-  .doc-row {
-    padding: 10px 12px;
-  }
-
-  /* 11. Audit Logbook Screen */
-  .filters {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 8px;
-  }
-
-  .filters .field {
-    width: 100%;
-    font-size: 16px; /* Prevents iOS auto-zoom */
-    min-height: 40px;
-  }
-
-  .audit-group-head {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 6px;
-    padding: 12px 12px;
-  }
-
-  .audit-task-meta {
-    margin-left: 0;
-    width: 100%;
-    display: flex;
-    justify-content: space-between;
-  }
-
-  .audit-event-row {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 6px;
-    padding: 10px 12px;
-  }
-
-  .audit-event-subinfo {
-    flex-wrap: wrap;
-    gap: 6px;
-  }
-
-  /* 12. Modals on Mobile Viewports */
+  /* 10. Modals & Overlays Responsive Design */
   .auth-overlay,
-  .confirm-overlay {
-    padding: 12px;
+  .confirm-overlay,
+  .evaluator-briefing-overlay,
+  .modal-backdrop {
+    padding: 10px;
   }
 
   .auth-modal,
   .confirm-modal,
-  .lockdown-modal {
-    width: calc(100% - 16px);
-    max-width: 100%;
-    padding: 20px 16px;
-    margin: 8px;
-    max-height: 90dvh;
-    overflow-y: auto;
-  }
-
-  .auth-input {
-    font-size: 16px; /* Prevents iOS auto-zoom */
-    padding: 10px 12px;
-  }
-
-  /* 13. Evaluator Briefing Modal on Mobile */
-  .evaluator-briefing-overlay {
-    padding: 10px;
-  }
-
+  .lockdown-modal,
+  .modal-card,
+  .edit-approval-modal,
   .evaluator-briefing-modal {
-    max-height: 94dvh;
-    border-radius: 14px;
+    width: min(95vw, 560px) !important;
+    max-width: 95vw !important;
+    padding: 18px 14px !important;
+    margin: 6px auto !important;
+    max-height: 92dvh !important;
+    overflow-y: auto !important;
+    border-radius: 14px !important;
   }
 
-  .briefing-header {
-    padding: 20px 16px 12px;
+  .auth-input,
+  .field,
+  .input {
+    font-size: 16px !important; /* Prevents iOS auto-zoom */
+    padding: 10px 12px !important;
   }
 
-  .briefing-title {
-    font-size: 19px;
+  /* 11. Code & Markdown Overflow Containment */
+  .code-wrap pre,
+  .code-wrap code,
+  pre code,
+  .markdown-body pre,
+  .markdown-body table {
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+    max-width: 100% !important;
+    word-break: break-word !important;
   }
-
-  .briefing-subtitle {
-    font-size: 12.5px;
-  }
-
-  .briefing-content {
-    padding: 14px 16px;
-    gap: 12px;
-  }
-
-  .briefing-icon-grid {
-    grid-template-columns: 1fr;
-    gap: 10px;
-  }
-
-  .briefing-icon-card {
-    padding: 14px 12px;
-  }
-
-  .bms-origin {
-    display: none;
-  }
-
-  .briefing-footer {
-    padding: 14px 16px 18px;
-    flex-direction: column;
-    align-items: stretch;
-    gap: 12px;
-  }
-
-  .briefing-slide-track {
-    width: 100%;
-  }
-
 }
 
-/* Extra Compact Devices (<= 400px) */
-@media (max-width: 400px) {
+/* ==========================================================================
+   EXTRA COMPACT SMARTPHONES (<= 480px / <= 400px)
+   ========================================================================== */
+
+@media (max-width: 480px) {
   .topbar {
-    padding: 8px 10px;
+    padding: 6px 10px;
+    gap: 4px;
+  }
+
+  .cloud-badge {
+    max-width: 86px;
+    font-size: 10px;
+    padding: 2px 6px;
+  }
+
+  .sovereignty {
+    font-size: 10.5px;
+    padding: 3px 6px;
+    gap: 4px;
+  }
+
+  .lock-toggle {
+    font-size: 10.5px;
+    padding: 3px 7px;
+    min-height: 28px;
+  }
+
+  .approval-card-actions {
+    grid-template-columns: 1fr !important;
+  }
+
+  .user-mgt-tabs .btn {
+    min-width: 100% !important;
   }
 
   .greeting {
@@ -7503,11 +7590,17 @@ select {
   }
 
   .chat-msg-user {
-    max-width: 95%;
+    max-width: 96%;
+  }
+}
+
+@media (max-width: 390px) {
+  .sov-text-compact {
+    display: none !important;
   }
 
-  .attachment-chip {
-    max-width: 100%;
+  .topbar-right {
+    gap: 4px;
   }
 }
 
