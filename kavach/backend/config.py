@@ -19,7 +19,7 @@ try:
 except ImportError:
     pass
 
-AUTO_LOGIN_SUPERADMIN = os.environ.get("AUTO_LOGIN_SUPERADMIN", "false").strip().lower() in ("true", "1", "yes")
+AUTO_LOGIN_SUPERADMIN = os.environ.get("AUTO_LOGIN_SUPERADMIN", "true").strip().lower() not in ("false", "0", "no")
 
 MODELS_JSON_PATH = BACKEND_DIR / "models.json"
 KNOWLEDGE_DIR = PROJECT_ROOT / "knowledge"

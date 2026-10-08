@@ -81,6 +81,57 @@ class UserUpdateRequest(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Superadmin Auto-Provisioning Helper
+# ---------------------------------------------------------------------------
+
+def get_or_create_superadmin(db: Session) -> User:
+    """Ensures default departments, roles, and superadmin account exist in the database."""
+    default_depts = [
+        ("general", "General plant operations and shared services"),
+        ("process", "Process Engineering, refining units and reactions"),
+        ("maintenance", "Mechanical, rotating equipment & reliability"),
+        ("hse", "Health, Safety & Environmental compliance"),
+        ("projects", "Plant engineering projects"),
+        ("finance", "Finance & commercial operations"),
+    ]
+    for d_name, d_desc in default_depts:
+        if not db.query(Department).filter(Department.name == d_name).first():
+            db.add(Department(name=d_name, description=d_desc))
+
+    default_roles = [
+        ("superadmin", "Sovereign Root / Plant CISO with platform-wide administrative authority"),
+        ("admin", "Department administrator with local user and operational authority"),
+        ("approver", "Supervisor/manager with sign-off and approval gate authority"),
+        ("auditor", "Compliance auditor with complete read-only audit log access"),
+        ("engineer", "Standard operator and query analysis access"),
+    ]
+    for r_name, r_desc in default_roles:
+        if not db.query(Role).filter(Role.name == r_name).first():
+            db.add(Role(name=r_name, description=r_desc))
+
+    db.commit()
+
+    superadmin = (
+        db.query(User)
+        .filter((User.role == "superadmin") | (User.email == "admin@kavach.local"))
+        .first()
+    )
+    if not superadmin:
+        superadmin = User(
+            name="System Administrator",
+            email="admin@kavach.local",
+            password_hash=hash_password("adminpassword"),
+            role="superadmin",
+            department="general",
+        )
+        db.add(superadmin)
+        db.commit()
+        db.refresh(superadmin)
+
+    return superadmin
+
+
+# ---------------------------------------------------------------------------
 # Auth Dependencies
 # ---------------------------------------------------------------------------
 
@@ -98,13 +149,7 @@ def get_current_user(
     if not token:
         from backend.config import AUTO_LOGIN_SUPERADMIN
         if AUTO_LOGIN_SUPERADMIN and not kavach_explicit_logout:
-            superadmin = (
-                db.query(User)
-                .filter((User.role == "superadmin") | (User.email == "admin@kavach.local"))
-                .first()
-            )
-            if superadmin:
-                return superadmin
+            return get_or_create_superadmin(db)
 
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -317,11 +362,7 @@ def me(
     # If no valid token found, check AUTO_LOGIN_SUPERADMIN
     from backend.config import AUTO_LOGIN_SUPERADMIN
     if AUTO_LOGIN_SUPERADMIN and not kavach_explicit_logout:
-        superadmin = (
-            db.query(User)
-            .filter((User.role == "superadmin") | (User.email == "admin@kavach.local"))
-            .first()
-        )
+        superadmin = get_or_create_superadmin(db)
         if superadmin:
             token = create_access_token({
                 "sub": str(superadmin.id),
@@ -331,13 +372,14 @@ def me(
                 "department": superadmin.department,
             })
             max_age = JWT_EXPIRATION_DAYS * 24 * 3600
+            is_cloud = os.environ.get("CLOUD_DEPLOYMENT", "false").lower() == "true" or bool(os.environ.get("RENDER"))
             response.set_cookie(
                 key="access_token",
                 value=token,
                 max_age=max_age,
                 httponly=True,
-                samesite="lax",
-                secure=False,
+                samesite="none" if is_cloud else "lax",
+                secure=is_cloud,
                 path="/",
             )
             return UserResponse(

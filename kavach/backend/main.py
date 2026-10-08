@@ -27,7 +27,13 @@ from sqlalchemy.orm import Session
 from backend import config
 from backend.engine import registry, ollama
 from backend.audit.logbook import log_event, read_events, verify_chain
-from backend.auth.routes import router as auth_router, get_optional_user, get_current_user, require_role
+from backend.auth.routes import (
+    router as auth_router,
+    get_optional_user,
+    get_current_user,
+    require_role,
+    get_or_create_superadmin,
+)
 from backend.brain.agent import run_agent
 from backend.brain.event_bus import emit_sync, register_task, unregister_task
 from backend.chat.routes import router as chat_router
@@ -90,6 +96,19 @@ app.add_middleware(
 
 app.include_router(auth_router)
 app.include_router(chat_router)
+
+
+@app.on_event("startup")
+def on_startup():
+    """Initializes default database records (departments, roles, superadmin) on application boot."""
+    try:
+        db = SessionLocal()
+        try:
+            get_or_create_superadmin(db)
+        finally:
+            db.close()
+    except Exception as e:
+        print(f"[WARN] Database initialization on startup encountered: {e}")
 
 VANILLA_FRONTEND_DIR = config.PROJECT_ROOT / "frontend"
 REACT_FRONTEND_DIR = config.PROJECT_ROOT / "frontend-react" / "dist"
